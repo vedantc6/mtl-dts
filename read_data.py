@@ -1,58 +1,64 @@
-import json
-from collections import Counter
-import numpy as np
-
-conll_path = "./data/datasets/conll04/"
-ade_path = "./data/datasets/ade/"
-
-conll_data = json.load(open(conll_path + "conll04_dev.json"))
-conll_entities = set()
-conll_relations = set()
-word2idx = {}
-idx2word = {}
-
-def create_dataset(path, datatype="conll04"):
-    wordseqs = []
-    tagseqs = []
-    # charseqslist = []
-    # charseqs = []
-    wordcounter = Counter()
-    tagcounter = Counter()
-    # charcounter = Counter()
-    # if datatype == "conll04":
-    data = json.load(open(path))
-    for datapoint in data:
-        tagseq = []
-        for key, val in datapoint.items():
-            if key == "entities":
-                for entity in val:
-                    tagseq.append((entity["start"], entity["end"], entity["type"]))
-                    conll_entities.add(entity['type'])
-            if key == "relations":
-                for relation in val:
-                    conll_relations.add(relation['type'])
-            if key == "tokens":
-                for tokens in val:
-                    wordcounter[tokens] += 1
-        # if "self-propelled" in datapoint["tokens"]:
-        #     print(datapoint["tokens"])
-
-        if tagseq:
-            tmp_seq = np.chararray(shape=(len(datapoint["tokens"], )), itemsize=20)
-            tmp_seq[:] = "0"
-            for tags in tagseq:
-                start, end, ent_type = tags
-                tmp_seq[start] = "B-" + ent_type
-                if end - start > 1:
-                    tmp_seq[start+1:end] = "I-" + ent_type
-            tmp_seq = np.char.decode(tmp_seq, "utf-8")
-        print(datapoint["tokens"])
-        wordseqs.append(datapoint["tokens"])
-        tagseqs.append(list(tmp_seq))
-    
-    # for sent, tags in zip(wordseqs, tagseqs):
-    #     print(sent, tags)
-    assert len(wordseqs) == len(data)   # check for no data is lost
+import os
+from utils import load_vertical_tagged_data
            
-if __name__ == "__main__":
-    create_dataset(conll_path + "conll04_dev.json")
+class Dataset():
+    def __init__(self, data_dir, data_name, batch_size, device, lower=True, vocab_size=1000000000, pad='<pad>', unk='<unk>'):
+        self.data_dir = data_dir
+        self.data_name = data_name
+        self.batch_size = batch_size
+        self.device = device
+        self.lower = lower
+        self.vocab_size = vocab_size
+        self.PAD = pad
+        self.UNK = unk
+        self.PAD_ind = 0
+        self.UNK_ind = 1
+        self.populate_attributes()
+
+    def populate_attributes(self):
+        # Load training portion.
+        (self.wordseqs_train, self.tagseqs_train, self.relseqs_train, self.wordcounter_train, self.tagcounter_train, self.relcounter_train)\
+         = load_vertical_tagged_data(os.path.join(self.data_dir, self.data_name + '_train.json'))
+
+        # Create index maps from training portion.
+        self.word2x = self.get_imap(self.wordcounter_train, max_size=self.vocab_size, lower=self.lower, pad_unk=True)
+        self.tag2y = self.get_imap(self.tagcounter_train, max_size=None, lower=False, pad_unk=True)
+        self.relation2y = self.get_imap(self.relcounter_train, max_size=None, lower=False, pad_unk=False)
+        print(self.tag2y)
+        print("************")
+        print(self.relation2y)
+
+        # Load validation and test portions.
+        (self.wordseqs_val, self.tagseqs_val, self.relseqs_val, _, _, _) = load_vertical_tagged_data(
+                                                                                    os.path.join(self.data_dir, self.data_name + '_dev.json'))
+        (self.wordseqs_test, self.tagseqs_test, self.relseqs_test, _, _, _) = load_vertical_tagged_data(
+                                                                                    os.path.join(self.data_dir, self.data_name + '_test.json'))
+
+        # # Prepare batches.
+        # self.batches_train = self.batchfy(self.wordseqs_train,
+        #                                   self.tagseqs_train,
+        #                                   self.charseqslist_train)
+        # self.batches_val = self.batchfy(self.wordseqs_val,
+        #                                 self.tagseqs_val,
+        #                                 self.charseqslist_val)
+        # self.batches_test = self.batchfy(self.wordseqs_test,
+        #                                  self.tagseqs_test,
+        #                                  self.charseqslist_test)
+
+    def get_imap(self, counter, max_size=None, lower=False, pad_unk=True):
+        if pad_unk:
+            imap = {self.PAD: self.PAD_ind, self.UNK: self.UNK_ind}
+        else:
+            imap = {}
+        if max_size is None or len(counter) <= max_size:
+            strings = counter.keys()
+        else:
+            strings = list(zip(*sorted(counter.items(), key=lambda x: x[1],
+                                       reverse=True)[:max_size]))[0]
+        for string in strings:
+            if lower:
+                string = string.lower()
+            if not string in imap:
+                imap[string] = len(imap)
+        return imap
+    
