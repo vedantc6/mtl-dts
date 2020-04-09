@@ -4,6 +4,7 @@ import numpy as np
 from allennlp.modules.elmo import Elmo, batch_to_ids
 from gensim.scripts.glove2word2vec import glove2word2vec
 from gensim.models import KeyedVectors
+from torchtext.vocab import Vectors
 import os
 import torch
 
@@ -116,26 +117,17 @@ def load_glove_embeddings(sentences):
     """
     Converts each word of the sentences to the respective Glove embeddings.
 
-    :param sentences:
-    :return:
+    :param sentences
+    return:
     """
 
-    # Read the Glove embeddings from the file.
-    if not os.path.exists("data/embeddings/glove.6B.300d.txt.word2vec"):
-        glove_input_file = 'data/embeddings/glove.6B.300d.txt'
-        word2vec_output_file = 'data/embeddings/glove.6B.300d.txt.word2vec'
-        glove2word2vec(glove_input_file, word2vec_output_file)
-
-    model = KeyedVectors.load_word2vec_format('data/embeddings/glove.6B.300d.txt.word2vec', binary=False)
+    # Load the glove vectors saved locally.
+    glove_vectors = Vectors('glove.6B.300d.txt', './data/embeddings/')
 
     # Convert the input sentences to embeddings.
     final_sentences = []
     for sentence in sentences:
-        sentence_with_embeddings = []
-        for word in sentence:
-            word = word.lower()
-            sentence_with_embeddings.append(model[word])
-
+        sentence_with_embeddings = glove_vectors.get_vecs_by_tokens(sentence)
         final_sentences.append(sentence_with_embeddings)
     return final_sentences
 
@@ -145,4 +137,3 @@ def load_glove_embeddings(sentences):
 if __name__ == "__main__":
     embeds = load_glove_embeddings(sentences=[["I", "ate", "an", "apple", "for", "breakfast"],
                                           ["I", "ate", "an", "orange", "for", "dinner"]])
-    print(embeds)
