@@ -5,21 +5,67 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 
 class SharedRNN(nn.Module):
-    def __init__(self, num_word_types, num_tag_types, num_char_types, word_dim, char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
+    """
+
+    """
+
+    def __init__(self,
+                 num_word_types,
+                 num_tag_types,
+                 num_char_types,
+                 word_dim,
+                 char_dim,
+                 hidden_dim,
+                 dropout,
+                 num_layers,
+                 recurrent_unit="gru"):
+        super(SharedRNN, self).__init__()
         self.cemb = nn.Embedding(num_char_types, char_dim)
-        self.charRNN = CharRNN(self.cemb, 1, recurrent_unit)
+        self.charRNN = CharBiRNN(self.cemb, 1, recurrent_unit)
 
-class NERSpecificRNN(nn.Module):
-    def __init__(self, num_word_types, num_tag_types, num_char_types, word_dim, char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
+class NERSpecificBiRNN(nn.Module):
+    """
+
+    """
+
+    def __init__(self,
+                 num_word_types,
+                 num_tag_types,
+                 num_char_types,
+                 word_dim,
+                 char_dim,
+                 hidden_dim,
+                 dropout,
+                 num_layers,
+                 recurrent_unit="gru"):
+        super(NERSpecificBiRNN, self).__init__()
         pass
 
-class RESpecificRNN(nn.Module):
-    def __init__(self, num_word_types, num_tag_types, num_char_types, word_dim, char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
+class RESpecificBiRNN(nn.Module):
+    """
+
+    """
+
+    def __init__(self,
+                 num_word_types,
+                 num_tag_types,
+                 num_char_types,
+                 word_dim,
+                 char_dim,
+                 hidden_dim,
+                 dropout,
+                 num_layers,
+                 recurrent_unit="gru"):
+        super(RESpecificBiRNN, self).__init__()
         pass
 
-class CharRNN(nn.Module):
+class CharBiRNN(nn.Module):
+    """
+
+    """
+
     def __init__(self, cemb, num_layers=1, unit="gru"):
-        super(CharRNN, self).__init__()
+        super(CharBiRNN, self).__init__()
         self.cemb = cemb
         if unit == "gru":
             self.birnn = nn.GRU(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
@@ -27,6 +73,13 @@ class CharRNN(nn.Module):
             self.birnn = nn.LSTM(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
 
     def forward(self, padded_chars, char_lengths):
+        """
+
+        :param padded_chars:
+        :param char_lengths:
+        :return:
+        """
+
         B = len(char_lengths)
 
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,

@@ -1,7 +1,11 @@
 import os
 from utils import load_vertical_tagged_data
-           
+
 class Dataset():
+    """
+
+    """
+
     def __init__(self, data_dir, data_name, batch_size, device, lower=True, vocab_size=1000000000, pad='<pad>', unk='<unk>'):
         self.data_dir = data_dir
         self.data_name = data_name
@@ -61,4 +65,3 @@ class Dataset():
             if not string in imap:
                 imap[string] = len(imap)
         return imap
-    

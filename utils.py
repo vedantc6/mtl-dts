@@ -2,13 +2,23 @@ import json
 from collections import Counter
 import numpy as np
 from allennlp.modules.elmo import Elmo, batch_to_ids
-import os 
+from gensim.scripts.glove2word2vec import glove2word2vec
+from gensim.models import KeyedVectors
+import os
 import torch
+
 
 conll_entities = set()
 conll_relations = set()
 
 def load_vertical_tagged_data(path, sort_by_length=True):
+    """
+
+    :param path:
+    :param sort_by_length:
+    :return:
+    """
+
     wordseqs = []
     tagseqs = []
     relseqs = []
@@ -48,28 +58,39 @@ def load_vertical_tagged_data(path, sort_by_length=True):
         wordseqs.append(datapoint["tokens"])
         tagseqs.append(tmp_seq)
         relseqs.append(tmp_rel)
-    
+
     for sent, tags, rels in zip(wordseqs, tagseqs, relseqs):
         for word, tag, rel in zip(sent, tags, rels):
             wordcounter[word] += 1
             tagcounter[tag] += 1
             relcounter[rel[2]] += 1
-    
+
     if sort_by_length:
         wordseqs, tagseqs, relseqs = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs), key=lambda x: len(x[0]), reverse=True)))
     assert len(wordseqs) == len(data), "Make sure the data is loading properly and is not lost"
     return wordseqs, tagseqs, relseqs, wordcounter, tagcounter, relcounter
 
 def load_elmo_weights(sentences, num_output_representations=1, dropout=0, mode="single"):
+    """
+    Converts each word of the sentences to their respective ELMO embeddings.
+
+    :param sentences:
+    :param num_output_representations:
+    :param dropout:
+    :param mode:
+    :return:
+    """
+
     options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_options.json"
     if os.path.exists("pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"):
         weight_file = "pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
     else:
         weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
-    
+
     elmo = Elmo(options_file, weight_file, num_output_representations=num_output_representations, dropout=dropout)
 
-    #Converts a batch of tokenized sentences to a tensor representing the sentences with encoded characters (len(batch), max sentence length, max word length).
+    # Converts a batch of tokenized sentences to a tensor representing the sentences with encoded
+    # characters (len(batch), max sentence length, max word length).
     character_ids = batch_to_ids(sentences)
 
     elmo_embedding = elmo(character_ids)
@@ -79,16 +100,49 @@ def load_elmo_weights(sentences, num_output_representations=1, dropout=0, mode="
     else:
         batch_size, timesteps, embed_dim = elmo_embedding['elmo_representations'][-1].shape()
         emb_list = [vect for vect in elmo_embedding['elmo_representations']]
-        embs = torch.cat(emb_list, 2).view(batch_size, -1, embed_dim, num_output_representations)
+        embeddings = torch.cat(emb_list, 2).view(batch_size, -1, embed_dim, num_output_representations)
+
+        # concatenate different output representations of elmo embeddings
         if mode == "concat_layers":
-            # concatenate different output representations of elmo embeddings
-            return embs
+            return embeddings
+
+        # weighted sum of output representations
         else:
-            # weighted sum of output representations
             vars = torch.Tensor(num_output_representations, 1).cuda()
-            embs = torch.matmul(embs, vars).view(batch_size, -1, embed_dim)
-            return embs
+            embeddings = torch.matmul(embeddings, vars).view(batch_size, -1, embed_dim)
+            return embeddings
+
+def load_glove_embeddings(sentences):
+    """
+    Converts each word of the sentences to the respective Glove embeddings.
+
+    :param sentences:
+    :return:
+    """
+
+    # Read the Glove embeddings from the file.
+    if not os.path.exists("data/embeddings/glove.6B.300d.txt.word2vec"):
+        glove_input_file = 'data/embeddings/glove.6B.300d.txt'
+        word2vec_output_file = 'data/embeddings/glove.6B.300d.txt.word2vec'
+        glove2word2vec(glove_input_file, word2vec_output_file)
+
+    model = KeyedVectors.load_word2vec_format('data/embeddings/glove.6B.300d.txt.word2vec', binary=False)
+
+    # Convert the input sentences to embeddings.
+    final_sentences = []
+    for sentence in sentences:
+        sentence_with_embeddings = []
+        for word in sentence:
+            word = word.lower()
+            sentence_with_embeddings.append(model[word])
+
+        final_sentences.append(sentence_with_embeddings)
+    return final_sentences
+
+
 
 # FOR TESTING
 if __name__ == "__main__":
-    embeds = load_elmo_weights(sentences = [["I", "ate", "an", "apple", "for", "breakfast"],["I", "ate", "an", "orange", "for", "dinner"]])
+    embeds = load_glove_embeddings(sentences=[["I", "ate", "an", "apple", "for", "breakfast"],
+                                          ["I", "ate", "an", "orange", "for", "dinner"]])
+    print(embeds)
