@@ -12,10 +12,11 @@ def load_vertical_tagged_data(path, sort_by_length=True):
     wordseqs = []
     tagseqs = []
     relseqs = []
-
+    charseqslist = []
     wordcounter = Counter()
     tagcounter = Counter()
     relcounter = Counter()
+    charcounter = Counter()
 
     data = json.load(open(path))
     for datapoint in data:
@@ -46,21 +47,24 @@ def load_vertical_tagged_data(path, sort_by_length=True):
                 tmp_rel.append((tagseq[start][1]-1, tagseq[end][1]-1, rel_type))
 
         wordseqs.append(datapoint["tokens"])
+        charseqslist.append([char for words in datapoint["tokens"] for char in words])
         tagseqs.append(tmp_seq)
         relseqs.append(tmp_rel)
     
-    for sent, tags, rels in zip(wordseqs, tagseqs, relseqs):
-        for word, tag, rel in zip(sent, tags, rels):
+    for sent, tags, rels, charslist in zip(wordseqs, tagseqs, relseqs, charseqslist):
+        for word, tag, rel, chars in zip(sent, tags, rels, charslist):
             wordcounter[word] += 1
             tagcounter[tag] += 1
             relcounter[rel[2]] += 1
-    
-    if sort_by_length:
-        wordseqs, tagseqs, relseqs = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs), key=lambda x: len(x[0]), reverse=True)))
-    assert len(wordseqs) == len(data), "Make sure the data is loading properly and is not lost"
-    return wordseqs, tagseqs, relseqs, wordcounter, tagcounter, relcounter
+            for char in chars:
+                charcounter[char] += 1
 
-def load_elmo_weights(sentences, num_output_representations=1, dropout=0, mode="single"):
+    if sort_by_length:
+        wordseqs, tagseqs, relseqs, charseqs = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs, charseqslist), key=lambda x: len(x[0]), reverse=True)))
+    assert len(wordseqs) == len(data), "Make sure the data is loading properly and is not lost"
+    return wordseqs, tagseqs, relseqs, charseqslist, wordcounter, tagcounter, relcounter, charcounter
+
+def load_elmo_embeddings(sentences, num_output_representations=1, dropout=0, mode="single"):
     options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_options.json"
     if os.path.exists("pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"):
         weight_file = "pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
@@ -89,6 +93,13 @@ def load_elmo_weights(sentences, num_output_representations=1, dropout=0, mode="
             embs = torch.matmul(embs, vars).view(batch_size, -1, embed_dim)
             return embs
 
+def load_glove_embeddings():
+    pass
+
+def load_onehot_embeddings(sentences):
+    pass
+
+
 # FOR TESTING
 if __name__ == "__main__":
-    embeds = load_elmo_weights(sentences = [["I", "ate", "an", "apple", "for", "breakfast"],["I", "ate", "an", "orange", "for", "dinner"]])
+    embeds = load_elmo_embeddings(sentences = [["I", "ate", "an", "apple", "for", "breakfast"],["I", "ate", "an", "orange", "for", "dinner"]])
