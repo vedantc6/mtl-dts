@@ -60,8 +60,10 @@ def load_vertical_tagged_data(path, sort_by_length=True):
                 charcounter[char] += 1
 
     if sort_by_length:
-        wordseqs, tagseqs, relseqs, charseqs = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs, charseqslist), key=lambda x: len(x[0]), reverse=True)))
+        wordseqs, tagseqs, relseqs, charseqslist = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs, charseqslist), \
+                                                    key=lambda x: len(x[0]), reverse=True)))
     assert len(wordseqs) == len(data), "Make sure the data is loading properly and is not lost"
+
     return wordseqs, tagseqs, relseqs, charseqslist, wordcounter, tagcounter, relcounter, charcounter
 
 def load_elmo_embeddings(sentences, num_output_representations=1, dropout=0, mode="single"):
