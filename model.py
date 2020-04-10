@@ -164,12 +164,6 @@ class SharedBiRNN(nn.Module):
         glove_embeddings = load_glove_embeddings(X)
         word_embeddings = torch.cat([elmo_embeddings, glove_embeddings], dim=2)
 
-
-dataset_loader = Dataset()
-shared_rnn = SharedBiRNN(num_word_types=len(dataset_loader.word2x),
-                         num_char_types=len(dataset_loader.char2c))
-shared_rnn.forward(dataset_loader.wordseqs_train[:2])
-
 class NERSpecificBiRNN(nn.Module):
     """
 
