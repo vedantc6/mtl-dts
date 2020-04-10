@@ -5,12 +5,24 @@ from allennlp.modules.elmo import Elmo, batch_to_ids
 from gensim.scripts.glove2word2vec import glove2word2vec
 from gensim.models import KeyedVectors
 from torchtext.vocab import Vectors
+from torchtext.data import Field
 import os
 import torch
+import spacy
 
 
 conll_entities = set()
 conll_relations = set()
+
+def tokenizer(text):
+    """
+
+    :param text:
+    :return:
+    """
+
+    spacy_en = spacy.load('en')
+    return [tok.text for tok in spacy_en.tokenizer(text)]
 
 def load_vertical_tagged_data(path, sort_by_length=True):
     """
@@ -23,15 +35,18 @@ def load_vertical_tagged_data(path, sort_by_length=True):
     wordseqs = []
     tagseqs = []
     relseqs = []
+    charseqslist = []
 
     wordcounter = Counter()
     tagcounter = Counter()
     relcounter = Counter()
+    charcounter = Counter()
 
     data = json.load(open(path))
     for datapoint in data:
         tagseq = []
         relseq = []
+
         for key, val in datapoint.items():
             if key == "entities":
                 for entity in val:
@@ -41,7 +56,7 @@ def load_vertical_tagged_data(path, sort_by_length=True):
                 for relation in val:
                     relseq.append((relation["head"], relation["tail"], relation["type"]))
                     conll_relations.add(relation['type'])
-        # print(tagseq, "##############", relseq)
+
         if tagseq:
             tmp_seq = np.chararray(shape=(len(datapoint["tokens"], )), itemsize=15)
             tmp_seq[:] = "O"
@@ -54,7 +69,13 @@ def load_vertical_tagged_data(path, sort_by_length=True):
             tmp_rel = []
             for rel in relseq:
                 start, end, rel_type = rel
-                tmp_rel.append((tagseq[start][1]-1, tagseq[end][1]-1, rel_type))
+                tmp_rel.append((tagseq[start][1] - 1, tagseq[end][1] - 1, rel_type))
+
+        # Build char list
+        charseqslist.append([[c for c in word] for word in datapoint['tokens']])
+        for word in datapoint['tokens']:
+            for c in word:
+                charcounter[c] += 1
 
         wordseqs.append(datapoint["tokens"])
         tagseqs.append(tmp_seq)
@@ -67,9 +88,10 @@ def load_vertical_tagged_data(path, sort_by_length=True):
             relcounter[rel[2]] += 1
 
     if sort_by_length:
-        wordseqs, tagseqs, relseqs = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs), key=lambda x: len(x[0]), reverse=True)))
+        wordseqs, tagseqs, relseqs, charseqslist = (list(t) for t in \
+                                zip(*sorted(zip(wordseqs, tagseqs, relseqs, charseqslist), key=lambda x: len(x[0]), reverse=True)))
     assert len(wordseqs) == len(data), "Make sure the data is loading properly and is not lost"
-    return wordseqs, tagseqs, relseqs, wordcounter, tagcounter, relcounter
+    return wordseqs, tagseqs, relseqs, charseqslist, wordcounter, tagcounter, relcounter, charcounter
 
 def load_elmo_weights(sentences, num_output_representations=1, dropout=0, mode="single"):
     """
@@ -126,14 +148,15 @@ def load_glove_embeddings(sentences):
 
     # Convert the input sentences to embeddings.
     final_sentences = []
+    batch_size = len(sentences)
+    max_len = max([len(sentence) for sentence in sentences])
     for sentence in sentences:
         sentence_with_embeddings = glove_vectors.get_vecs_by_tokens(sentence)
-        final_sentences.append(sentence_with_embeddings)
-    return final_sentences
 
+        # Add padding for words.
+        if len(sentence_with_embeddings) < max_len:
+            temp = torch.zeros([max_len - len(sentence), 300]).float()
+            sentence_with_embeddings = torch.cat([sentence_with_embeddings, temp], dim=0)
 
-
-# FOR TESTING
-if __name__ == "__main__":
-    embeds = load_glove_embeddings(sentences=[["I", "ate", "an", "apple", "for", "breakfast"],
-                                          ["I", "ate", "an", "orange", "for", "dinner"]])
+        final_sentences.append(torch.as_tensor(sentence_with_embeddings))
+    return torch.stack(final_sentences).view(batch_size, max_len, 300)
