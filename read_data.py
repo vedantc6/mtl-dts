@@ -4,7 +4,19 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 
 class Dataset():
-    def __init__(self, data_dir, data_name, batch_size, device, lower=True, vocab_size=1000000000, pad='<pad>', unk='<unk>'):
+    """
+
+    """
+
+    def __init__(self,
+                 data_dir='./data/datasets/conll04',
+                 data_name='conll04',
+                 batch_size=64,
+                 device='cpu',
+                 lower=True,
+                 vocab_size=1000000000,
+                 pad='<pad>',
+                 unk='<unk>'):
         self.data_dir = data_dir
         self.data_name = data_name
         self.batch_size = batch_size
@@ -120,4 +132,3 @@ class Dataset():
             if not string in imap:
                 imap[string] = len(imap)
         return imap
-    
