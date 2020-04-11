@@ -2,10 +2,7 @@ import json
 from collections import Counter
 import numpy as np
 from allennlp.modules.elmo import Elmo, batch_to_ids
-from gensim.scripts.glove2word2vec import glove2word2vec
-from gensim.models import KeyedVectors
 from torchtext.vocab import Vectors
-from torchtext.data import Field
 import os
 import torch
 import spacy

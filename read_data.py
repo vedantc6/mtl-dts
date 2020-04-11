@@ -40,7 +40,7 @@ class Dataset():
         self.tag2y = self.get_imap(self.tagcounter_train, max_size=None, lower=False, pad_unk=True)
         self.relation2y = self.get_imap(self.relcounter_train, max_size=None, lower=False, pad_unk=False)
         self.char2c = self.get_imap(self.charcounter_train, max_size=None, lower=self.lower, pad_unk=True)
-        
+
         # Load validation and test portions.
         (self.wordseqs_val, self.tagseqs_val, self.relseqs_val, self.charseqslist_val, _, _, _, _) = load_vertical_tagged_data(
                                                                                     os.path.join(self.data_dir, self.data_name + '_dev.json'))
@@ -58,7 +58,7 @@ class Dataset():
             if not xseqs:
                 return
             X = torch.stack(xseqs).to(self.device)  # B x T
-            Y = torch.stack(yseqs).to(self.device)  # B x T            
+            Y = torch.stack(yseqs).to(self.device)  # B x T
             flattened_cseqs = [item for sublist in cseqslist for item in sublist]  # List of BT tensors of varying lengths
             C = pad_sequence(flattened_cseqs, padding_value=self.PAD_ind, batch_first=True).to(self.device)  # BT x T_char
             C_lens = torch.LongTensor([s.shape[0] for s in flattened_cseqs]).to(self.device)
@@ -71,8 +71,9 @@ class Dataset():
         rseqs = []
         cseqslist = []
         prev_length = float('inf')
+
         raw_sentence = []
-        
+
         for i in range(len(wordseqs)):
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths

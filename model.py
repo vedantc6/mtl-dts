@@ -52,6 +52,36 @@ class MTLArchitecture(nn.Module):
 
         self.loss = nn.CrossEntropyLoss()
 
+class CharRNN(nn.Module):
+    """
+    Trains character level embeddings via Bidirectional LSTM.
+    """
+    def __init__(self, cemb, num_layers=1, recurrent_unit="gru"):
+        super(CharRNN, self).__init__()
+        self.cemb = cemb
+        if recurrent_unit == "gru":
+            self.birnn = nn.GRU(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
+        else:
+            self.birnn = nn.LSTM(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
+
+    def forward(self, padded_chars, char_lengths):
+        """
+
+        :param padded_chars:
+        :param char_lengths:
+        :return:
+        """
+
+        B = len(char_lengths)
+
+        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
+                                      batch_first=True, enforce_sorted=False)
+        _, (final_h, _) = self.birnn(packed)
+
+        final_h = final_h.view(self.birnn.num_layers, 2, B, self.birnn.hidden_size)[-1]       # 2 x BT x d_c
+        cembs = final_h.transpose(0, 1).contiguous().view(B, -1)  # BT x 2d_c
+        return cembs
+
 class SharedRNN(nn.Module):
     """
     A shared Bidirectional GRU layer that takes in the initial words, converts them to respective embeddings
@@ -61,8 +91,12 @@ class SharedRNN(nn.Module):
     CharDim = 32
     ELMODim = 1024
     GloveDim = 300
-    def __init__(self, num_word_types, shared_layer_size, num_char_types, \
-                    char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
+    def __init__(self,
+                 num_word_types,
+                 num_char_types,
+                 dropout=0.5,
+                 num_layers=1,
+                 recurrent_unit="gru"):
         super(SharedRNN, self).__init__()
         self.Pad_ind = 0
         word_dim = self.ELMODim + self.GloveDim + 2 * self.CharDim
@@ -73,11 +107,11 @@ class SharedRNN(nn.Module):
         self.charRNN = CharRNN(self.cemb, 1, recurrent_unit)
 
         if recurrent_unit == "gru":
-            self.wordRNN = nn.GRU(word_dim, shared_layer_size, num_layers, bidirectional=True)
+            self.wordRNN = nn.GRU(word_dim, word_dim, num_layers, bidirectional=True)
         else:
-            self.wordRNN = nn.LSTM(word_dim, shared_layer_size, num_layers, bidirectional=True)
-    
-    def forward(self, X):
+            self.wordRNN = nn.LSTM(word_dim, word_dim, num_layers, bidirectional=True)
+
+    def forward(self, X, C, C_lengths):
         """
         Pass the input sentences through the GRU layers.
 
@@ -85,9 +119,17 @@ class SharedRNN(nn.Module):
         :return:
         """
 
+        B, T = X.size()
         elmo_embeddings = load_elmo_embeddings(X)
         glove_embeddings = load_glove_embeddings(X)
-        word_embeddings = torch.cat([elmo_embeddings, glove_embeddings], dim=2)
+        char_embeddings = self.charRNN(C, C_lengths).view(B, T, -1)
+        final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
+        print(final_embeddings.size())
+
+dataset_loader = Dataset()
+X, C, C_lengths = dataset_loader.batches_train[0][0], dataset_loader.batches_train[0][2], dataset_loader.batches_train[0][3]
+shared_rnn = SharedRNN(num_word_types=len(dataset_loader.word2x), num_char_types=len(dataset_loader.char2c))
+shared_rnn(X, C, C_lengths)
 
 class NERSpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
@@ -122,33 +164,3 @@ class RESpecificRNN(nn.Module):
             self.FFNNr1 = nn.GELU()(input_)
 
         self.FFNNr2 = nn.Linear(self.FFNNr1, num_rel_types)
-
-class CharRNN(nn.Module):
-    """
-    Trains character level embeddings via Bidirectional LSTM.
-    """
-    def __init__(self, cemb, num_layers=1, recurrent_unit="gru"):
-        super(CharRNN, self).__init__()
-        self.cemb = cemb
-        if recurrent_unit == "gru":
-            self.birnn = nn.GRU(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
-        else:
-            self.birnn = nn.LSTM(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
-
-    def forward(self, padded_chars, char_lengths):
-        """
-
-        :param padded_chars:
-        :param char_lengths:
-        :return:
-        """
-
-        B = len(char_lengths)
-
-        packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
-                                      batch_first=True, enforce_sorted=False)
-        _, (final_h, _) = self.birnn(packed)
-
-        final_h = final_h.view(self.birnn.num_layers, 2, B, self.birnn.hidden_size)[-1]       # 2 x BT x d_c
-        cembs = final_h.transpose(0, 1).contiguous().view(B, -1)  # BT x 2d_c
-        return cembs   
