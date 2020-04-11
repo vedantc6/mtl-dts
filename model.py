@@ -4,23 +4,42 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from utils import load_glove_embeddings, load_elmo_embeddings
 from read_data import Dataset
 
+
 class MTLArchitecture(nn.Module):
-    '''
-    num_word_types: vocabulary size, to be used as input
-    shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
-    num_char_types: vocabulary of characters, to be used for CharRNN
-    word_dim: word dimension
-    char_dim: character dimension
-    hidden_dim: hidden dimensions of biRNN
-    dropout: dropout values for nodes in biRNN
-    num_layers: number of biRNN layers
-    num_tag_types: unique tags of the model, will be used by NER specific layers
-    num_rel_types: unique relations of the model, will be used by RE specific layers
-    recurrent_unit: GRU/LSTM
-    '''
-    def __init__(self, num_word_types, shared_layer_size, num_char_types, \
-                        char_dim, hidden_dim, dropout, num_layers_shared, num_layers_ner, num_layers_re, \
-                        num_tag_types, num_rel_types, activation_type="relu", recurrent_unit="gru"):
+    """
+
+    """
+
+    def __init__(self,
+                 num_word_types,
+                 shared_layer_size,
+                 num_char_types,
+                 word_dim,
+                 char_dim,
+                 hidden_dim,
+                 dropout,
+                 num_layers_shared,
+                 num_layers_ner,
+                 num_layers_re,
+                 num_tag_types,
+                 num_rel_types,
+                 activation_type="relu",
+                 recurrent_unit="gru"):
+        """
+        Initialise.
+
+        :param num_word_types: vocabulary size, to be used as input
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_char_types: vocabulary of characters, to be used for CharRNN
+        :param word_dim: word dimension
+        :param char_dim: character dimension
+        :param hidden_dim: hidden dimensions of biRNN
+        :param dropout: dropout values for nodes in biRNN
+        :param num_layers: number of biRNN layers
+        :param num_tag_types: unique tags of the model, will be used by NER specific layers
+        :param num_rel_types: unique relations of the model, will be used by RE specific layers
+        :param recurrent_unit: GRU/LSTM
+        """
         super(MTLArchitecture, self).__init__()
 
         self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types, \
@@ -28,7 +47,7 @@ class MTLArchitecture(nn.Module):
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout, \
                                         num_layers_ner, activation_type, recurrent_unit)
-        
+
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, \
                                         num_layers_re, activation_type, recurrent_unit)
 
@@ -36,7 +55,7 @@ class MTLArchitecture(nn.Module):
 
     def forward(self, X, C, C_lengths, sents):
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        
+
 
     def do_epoch(self, epoch_num, train_batches, optim, check_interval=200):
         self.train()
@@ -52,6 +71,7 @@ class SharedRNN(nn.Module):
     A shared Bidirectional GRU layer that takes in the initial words, converts them to respective embeddings
     and passes them to the respective NER and RE specific layers.
     """
+
     ELMODim = 1024
     GloveDim = 300
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
@@ -70,7 +90,7 @@ class SharedRNN(nn.Module):
             self.wordRNN = nn.GRU(word_dim, shared_layer_size, num_layers, bidirectional=True)
         else:
             self.wordRNN = nn.LSTM(word_dim, shared_layer_size, num_layers, bidirectional=True)
-    
+
     def forward(self, char_encoded, C_lengths, raw_sentences):
         """
         Pass the input sentences through the GRU layers.
@@ -104,21 +124,21 @@ class NERSpecificRNN(nn.Module):
             self.FFNNe1 = nn.Tanh()
         elif activation_type == "gelu":
             self.FFNNe1 = nn.GELU()
-        
+
         self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
 
 class RESpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_rel_types, hidden_dim, dropout, num_layers, \
                     activation_type="relu", recurrent_unit="gru"):
         super(RESpecificRNN, self).__init__()
-        
+
         if activation_type == "relu":
             self.FFNNr1 = nn.ReLU()
         elif activation_type == "tanh":
             self.FFNNr1 = nn.Tanh()
         elif activation_type == "gelu":
             self.FFNNr1 = nn.GELU()
-        
+
         self.FFNNr2 = nn.Linear(hidden_dim, num_rel_types)
 
 class CharRNN(nn.Module):
