@@ -2,7 +2,6 @@ import os
 from utils import load_vertical_tagged_data
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from pprint import pprint
 
 class Dataset():
     """
@@ -59,7 +58,7 @@ class Dataset():
             if not xseqs:
                 return
             X = torch.stack(xseqs).to(self.device)  # B x T
-            Y = torch.stack(yseqs).to(self.device)  # B x T            
+            Y = torch.stack(yseqs).to(self.device)  # B x T
             flattened_cseqs = [item for sublist in cseqslist for item in sublist]  # List of BT tensors of varying lengths
             C = pad_sequence(flattened_cseqs, padding_value=self.PAD_ind, batch_first=True).to(self.device)  # BT x T_char
             C_lens = torch.LongTensor([s.shape[0] for s in flattened_cseqs]).to(self.device)
@@ -73,7 +72,7 @@ class Dataset():
         cseqslist = []
         prev_length = float('inf')
         raw_sentence = []
-        
+
         for i in range(len(wordseqs)):
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths
@@ -90,10 +89,10 @@ class Dataset():
             rstartseq = torch.LongTensor(rstartseq)
             rendseq = torch.LongTensor(rendseq)
             rseq = torch.LongTensor(rseq)
-            
+
             cseqs = [torch.LongTensor([self.char2c[c] for c in word if c in self.char2c])  # Skip unknown
                      for word in wordseqs[i]]  # Use original words
-        
+
             if length < prev_length or len(xseqs) >= self.batch_size:
                 add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence)
                 xseqs = []
