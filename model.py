@@ -160,6 +160,7 @@ class CharRNN(nn.Module):
         :param char_lengths:
         :return:
         """
+
         B = len(char_lengths)
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
