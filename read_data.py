@@ -71,7 +71,6 @@ class Dataset():
         rseqs = []
         cseqslist = []
         prev_length = float('inf')
-
         raw_sentence = []
 
         for i in range(len(wordseqs)):
