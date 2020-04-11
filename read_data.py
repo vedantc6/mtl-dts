@@ -40,7 +40,7 @@ class Dataset():
         self.tag2y = self.get_imap(self.tagcounter_train, max_size=None, lower=False, pad_unk=True)
         self.relation2y = self.get_imap(self.relcounter_train, max_size=None, lower=False, pad_unk=False)
         self.char2c = self.get_imap(self.charcounter_train, max_size=None, lower=self.lower, pad_unk=True)
-        
+
         # Load validation and test portions.
         (self.wordseqs_val, self.tagseqs_val, self.relseqs_val, self.charseqslist_val, _, _, _, _) = load_vertical_tagged_data(
                                                                                     os.path.join(self.data_dir, self.data_name + '_dev.json'))
@@ -51,9 +51,6 @@ class Dataset():
         self.batches_train = self.batchfy(self.wordseqs_train, self.tagseqs_train, self.relseqs_train, self.charseqslist_train)
         self.batches_val = self.batchfy(self.wordseqs_val, self.tagseqs_val, self.relseqs_val, self.charseqslist_val)
         self.batches_test = self.batchfy(self.wordseqs_test, self.tagseqs_test, self.relseqs_test, self.charseqslist_test)
-        print(self.wordseqs_train[-1], self.tagseqs_train[-1], self.relseqs_train[-1], self.charseqslist_train[-1])
-        print("***************")
-        print(self.batches_train[-1])
 
     def batchfy(self, wordseqs, tagseqs, relseqs, charseqslist):
         batches = []
@@ -62,7 +59,7 @@ class Dataset():
             if not xseqs:
                 return
             X = torch.stack(xseqs).to(self.device)  # B x T
-            Y = torch.stack(yseqs).to(self.device)  # B x T            
+            Y = torch.stack(yseqs).to(self.device)  # B x T
             flattened_cseqs = [item for sublist in cseqslist for item in sublist]  # List of BT tensors of varying lengths
             C = pad_sequence(flattened_cseqs, padding_value=self.PAD_ind, batch_first=True).to(self.device)  # BT x T_char
             C_lens = torch.LongTensor([s.shape[0] for s in flattened_cseqs]).to(self.device)
@@ -75,7 +72,7 @@ class Dataset():
         rseqs = []
         cseqslist = []
         prev_length = float('inf')
-        
+
         for i in range(len(wordseqs)):
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths
