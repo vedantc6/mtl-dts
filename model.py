@@ -18,35 +18,45 @@ class MTLArchitecture(nn.Module):
     num_rel_types: unique relations of the model, will be used by RE specific layers
     recurrent_unit: GRU/LSTM
     '''
-    def __init__(self, num_word_types, shared_layer_size, num_char_types, word_dim, \
-                        char_dim, hidden_dim, dropout, num_layers, num_tag_types, \
-                        num_rel_types, activation_type="relu", recurrent_unit="gru"):
+    def __init__(self, num_word_types, shared_layer_size, num_char_types, \
+                        char_dim, hidden_dim, dropout, num_layers_shared, num_layers_ner, num_layers_re, \
+                        num_tag_types, num_rel_types, activation_type="relu", recurrent_unit="gru"):
         super(MTLArchitecture, self).__init__()
 
         self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types, \
-                                        word_dim, char_dim, hidden_dim, dropout, num_layers, \
-                                        recurrent_unit)
+                                        char_dim, hidden_dim, dropout, num_layers_shared, recurrent_unit)
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout, \
-                                        num_layers, activation_type, recurrent_unit)
+                                        num_layers_ner, activation_type, recurrent_unit)
         
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, \
-                                        num_layers, activation_type, recurrent_unit)
+                                        num_layers_re, activation_type, recurrent_unit)
 
         self.loss = nn.CrossEntropyLoss()
+
+    def forward(self, X, C, C_lengths, sents):
+        shared_representations = self.shared_layers(X, C, C_lengths, sents)
+        print(shared_representations)
+
+    def do_epoch(self, epoch_num, train_batches, optim, check_interval=200):
+        self.train()
+
+        output = {}
+        for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
+            optim.zero_grad()
+            forward_result = self.forward(X, C, C_lengths, sents)
 
 class SharedRNN(nn.Module):
     """
     A shared Bidirectional GRU layer that takes in the initial words, converts them to respective embeddings
     and passes them to the respective NER and RE specific layers.
     """
-
-    CharDim = 32
     ELMODim = 1024
     GloveDim = 300
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
                     char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
         super(SharedRNN, self).__init__()
+        self.CharDim = char_dim
         self.Pad_ind = 0
         word_dim = self.ELMODim + self.GloveDim + 2 * self.CharDim
         self.wemb = nn.Embedding(num_word_types, word_dim, padding_idx=self.Pad_ind)
@@ -60,17 +70,18 @@ class SharedRNN(nn.Module):
         else:
             self.wordRNN = nn.LSTM(word_dim, shared_layer_size, num_layers, bidirectional=True)
     
-    def forward(self, X):
+    def forward(self, X, C, C_lengths, sents):
         """
         Pass the input sentences through the GRU layers.
 
         :param X: batch of sentences
         :return:
         """
-
-        elmo_embeddings = load_elmo_embeddings(X)
-        glove_embeddings = load_glove_embeddings(X)
+        elmo_embeddings = load_elmo_embeddings(sents)
+        glove_embeddings = load_glove_embeddings(sents)
         word_embeddings = torch.cat([elmo_embeddings, glove_embeddings], dim=2)
+        creps = self.charRNN(C, C_lengths).view(B, T, -1)
+        return word_embeddings
 
 class NERSpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
@@ -96,15 +107,14 @@ class RESpecificRNN(nn.Module):
                     activation_type="relu", recurrent_unit="gru"):
         super(RESpecificRNN, self).__init__()
         
-        input_ = None
         if activation_type == "relu":
-            self.FFNNr1 = nn.ReLU()(input_)
+            self.FFNNr1 = nn.ReLU()
         elif activation_type == "tanh":
-            self.FFNNr1 = nn.Tanh()(input_) 
+            self.FFNNr1 = nn.Tanh()
         elif activation_type == "gelu":
-            self.FFNNr1 = nn.GELU()(input_)
+            self.FFNNr1 = nn.GELU()
         
-        self.FFNNr2 = nn.Linear(self.FFNNr1, num_rel_types)
+        self.FFNNr2 = nn.Linear(hidden_dim, num_rel_types)
 
 class CharRNN(nn.Module):
     """
@@ -125,13 +135,10 @@ class CharRNN(nn.Module):
         :param char_lengths:
         :return:
         """
-
         B = len(char_lengths)
-
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)
-
         final_h = final_h.view(self.birnn.num_layers, 2, B, self.birnn.hidden_size)[-1]       # 2 x BT x d_c
         cembs = final_h.transpose(0, 1).contiguous().view(B, -1)  # BT x 2d_c
         return cembs   

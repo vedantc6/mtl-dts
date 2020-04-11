@@ -51,14 +51,10 @@ class Dataset():
         self.batches_train = self.batchfy(self.wordseqs_train, self.tagseqs_train, self.relseqs_train, self.charseqslist_train)
         self.batches_val = self.batchfy(self.wordseqs_val, self.tagseqs_val, self.relseqs_val, self.charseqslist_val)
         self.batches_test = self.batchfy(self.wordseqs_test, self.tagseqs_test, self.relseqs_test, self.charseqslist_test)
-        print(self.wordseqs_train[-1], self.tagseqs_train[-1], self.relseqs_train[-1], self.charseqslist_train[-1])
-        print("***************")
-        print(self.batches_train[-1])
 
     def batchfy(self, wordseqs, tagseqs, relseqs, charseqslist):
         batches = []
-
-        def add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist):
+        def add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence):
             if not xseqs:
                 return
             X = torch.stack(xseqs).to(self.device)  # B x T
@@ -66,7 +62,7 @@ class Dataset():
             flattened_cseqs = [item for sublist in cseqslist for item in sublist]  # List of BT tensors of varying lengths
             C = pad_sequence(flattened_cseqs, padding_value=self.PAD_ind, batch_first=True).to(self.device)  # BT x T_char
             C_lens = torch.LongTensor([s.shape[0] for s in flattened_cseqs]).to(self.device)
-            batches.append((X, Y, C, C_lens, rstartseqs, rendseqs, rseqs))
+            batches.append((X, Y, C, C_lens, rstartseqs, rendseqs, rseqs, raw_sentence))
 
         xseqs = []
         yseqs = []
@@ -75,11 +71,13 @@ class Dataset():
         rseqs = []
         cseqslist = []
         prev_length = float('inf')
+        raw_sentence = []
         
         for i in range(len(wordseqs)):
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths
             wordseq = [word.lower() for word in wordseqs[i]] if self.lower else wordseqs[i]
+            raw_sentence.append(wordseqs[i])
             xseq = torch.LongTensor([self.word2x.get(word, self.UNK_ind) for word in wordseq])
             yseq = torch.LongTensor([self.tag2y.get(tag, self.UNK_ind) for tag in tagseqs[i]])
             rstartseq = []
@@ -96,13 +94,14 @@ class Dataset():
                      for word in wordseqs[i]]  # Use original words
 
             if length < prev_length or len(xseqs) >= self.batch_size:
-                add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist)
+                add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence)
                 xseqs = []
                 yseqs = []
                 rstartseqs = []
                 rendseqs= []
                 rseqs = []
                 cseqslist = []
+                raw_sentence = []
 
             xseqs.append(xseq)
             yseqs.append(yseq)
@@ -111,8 +110,9 @@ class Dataset():
             rseqs.append(rseq)
             cseqslist.append(cseqs)
             prev_length = length
+            raw_sentence.append(wordseqs[i])
 
-        add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist)
+        add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence)
 
         return batches
 

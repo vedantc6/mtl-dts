@@ -9,10 +9,21 @@ from torchtext.data import Field
 import os
 import torch
 import spacy
+import torch.nn as nn
 
 
 conll_entities = set()
 conll_relations = set()
+
+def get_init_weights(init_value):
+    def init_weights(m):
+        if init_value > 0.0:
+            if hasattr(m, 'weight') and hasattr(m.weight, 'uniform_'):
+                nn.init.uniform_(m.weight, a=-init_value, b=init_value)
+            if hasattr(m, 'bias') and hasattr(m.bias, 'uniform_'):
+                nn.init.uniform_(m.bias, a=-init_value, b=init_value)
+
+    return init_weights
 
 def tokenizer(text):
     """
@@ -146,7 +157,7 @@ def load_glove_embeddings(sentences):
     """
 
     # Load the glove vectors saved locally.
-    glove_vectors = Vectors('glove.6B.300d.txt', './data/embeddings/')
+    glove_vectors = Vectors('glove.6B.300d.txt', './pretrained_weights/')
 
     # Convert the input sentences to embeddings.
     final_sentences = []
