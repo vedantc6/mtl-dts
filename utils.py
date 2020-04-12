@@ -12,6 +12,12 @@ conll_entities = set()
 conll_relations = set()
 
 def get_init_weights(init_value):
+    """
+
+    :param init_value:
+    :return:
+    """
+
     def init_weights(m):
         if init_value > 0.0:
             if hasattr(m, 'weight') and hasattr(m.weight, 'uniform_'):
@@ -97,6 +103,7 @@ def load_elmo_embeddings(sentences, num_output_representations=1, dropout=0, mod
     :param mode:
     :return:
     """
+
     options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_options.json"
     if os.path.exists("pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"):
         weight_file = "pretrained_weights/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
@@ -155,9 +162,52 @@ def load_glove_embeddings(sentences):
     return torch.stack(final_sentences).view(batch_size, max_len, 300)
 
 def load_onehot_embeddings(sentences):
-    pass
+    """
+    Convert the words to a one-hot encoded casing vector based on the following categories:
+        1. All numeric
+        2. All alphabetic and all lower case
+        3. All alphabetic and all upper case
+        4. All alphabetic and title case
+        5. More than 50% of characters are numeric
+        6. At least one character is numeric
+        7. Other
+        8. A vector of 0’s was used for padding
 
+    :param sentences:
+    :return:
+    """
 
-# FOR TESTING
-if __name__ == "__main__":
-    embeds = load_elmo_embeddings(sentences = [["I", "ate", "an", "apple", "for", "breakfast"],["I", "ate", "an", "orange", "for", "dinner"]])
+    final_sentences = []
+    max_len = max([len(sentence) for sentence in sentences])
+    for sentence in sentences:
+        sentence_encoded = []
+        for word in sentence:
+            word_one_hot = torch.zeros(7).float()
+
+            if word.isnumeric():
+                word_one_hot[0] = 1
+            elif word.isalpha() and word.islower():
+                word_one_hot[1] = 1
+            elif word.isalpha() and word.isupper():
+                word_one_hot[2] = 1
+            elif word.isalpha() and word[0].isupper():
+                word_one_hot[3] = 1
+            elif sum(c.isnumeric() for c in word) / len(word) >= 0.5:
+                word_one_hot[4] = 1
+            elif sum(c.isnumeric() for c in word) > 0:
+                word_one_hot[5] = 1
+            else:
+                word_one_hot[6] = 1
+
+            sentence_encoded.append(word_one_hot)
+        sentence_encoded = torch.stack(sentence_encoded)
+
+        # Add padding for words.
+        if len(sentence) < max_len:
+            temp = torch.zeros([max_len - len(sentence), 7]).float()
+            sentence_encoded = torch.cat([sentence_encoded, temp], dim=0)
+
+        final_sentences.append(sentence_encoded)
+
+    final_sentences = torch.stack(final_sentences)
+    return final_sentences

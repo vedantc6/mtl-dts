@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from utils import load_glove_embeddings, load_elmo_embeddings
+from utils import load_glove_embeddings, load_elmo_embeddings, load_onehot_embeddings
 
 
 class MTLArchitecture(nn.Module):
@@ -65,6 +65,7 @@ class SharedRNN(nn.Module):
 
     ELMODim = 1024
     GloveDim = 300
+    OneHotDim = 7
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
                     char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
         """
@@ -82,8 +83,7 @@ class SharedRNN(nn.Module):
         super(SharedRNN, self).__init__()
         self.CharDim = char_dim
         self.Pad_ind = 0
-        word_dim = self.ELMODim + self.GloveDim + self.CharDim
-        # self.wemb = nn.Embedding(num_word_types, word_dim, padding_idx=self.Pad_ind)
+        word_dim = self.ELMODim + self.GloveDim + self.CharDim + self.OneHotDim
 
         # Initialise char-embedding BiRNN
         self.cemb = nn.Embedding(num_char_types, self.CharDim, padding_idx=self.Pad_ind)
@@ -106,9 +106,10 @@ class SharedRNN(nn.Module):
         elmo_embeddings = load_elmo_embeddings(raw_sentences)
         glove_embeddings = load_glove_embeddings(raw_sentences)
         char_embeddings = self.charRNN(char_encoded, C_lengths)
+        one_hot_embeddings = load_onehot_embeddings(raw_sentences)
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
-        final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
+        final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
 
         shared_output, _ = self.wordRNN(final_embeddings)
         return shared_output
@@ -212,6 +213,7 @@ class CharRNN(nn.Module):
         :param char_lengths:
         :return:
         """
+
         B = len(char_lengths)
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
