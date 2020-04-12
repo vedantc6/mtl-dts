@@ -2,13 +2,9 @@ import json
 from collections import Counter
 import numpy as np
 from allennlp.modules.elmo import Elmo, batch_to_ids
-from gensim.scripts.glove2word2vec import glove2word2vec
-from gensim.models import KeyedVectors
 from torchtext.vocab import Vectors
-from torchtext.data import Field
 import os
 import torch
-import spacy
 import torch.nn as nn
 
 
@@ -24,16 +20,6 @@ def get_init_weights(init_value):
                 nn.init.uniform_(m.bias, a=-init_value, b=init_value)
 
     return init_weights
-
-def tokenizer(text):
-    """
-
-    :param text:
-    :return:
-    """
-
-    spacy_en = spacy.load('en')
-    return [tok.text for tok in spacy_en.tokenizer(text)]
 
 def load_vertical_tagged_data(path, sort_by_length=True):
     """
