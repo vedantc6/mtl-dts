@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from utils import load_glove_embeddings, load_elmo_embeddings
 from read_data import Dataset
@@ -34,9 +35,11 @@ class MTLArchitecture(nn.Module):
 
         self.loss = nn.CrossEntropyLoss()
 
-    def forward(self, X, C, C_lengths, sents):
+    def forward(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        
+        print("Shared representations: ", shared_representations.shape)
+        ner_score = self.ner_layers(shared_representations, Y)
+        # print(ner_score.shape)
 
     def do_epoch(self, epoch_num, train_batches, optim, check_interval=200):
         self.train()
@@ -44,8 +47,7 @@ class MTLArchitecture(nn.Module):
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             optim.zero_grad()
-            print(X.shape, len(sents))
-            forward_result = self.forward(X, C, C_lengths, sents)
+            forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
 
 class SharedRNN(nn.Module):
     """
@@ -59,7 +61,7 @@ class SharedRNN(nn.Module):
         super(SharedRNN, self).__init__()
         self.CharDim = char_dim
         self.Pad_ind = 0
-        word_dim = self.ELMODim + self.GloveDim + 2 * self.CharDim
+        word_dim = self.ELMODim + self.GloveDim + self.CharDim
         # self.wemb = nn.Embedding(num_word_types, word_dim, padding_idx=self.Pad_ind)
 
         # Initialise char-embedding BiRNN
@@ -83,10 +85,11 @@ class SharedRNN(nn.Module):
         glove_embeddings = load_glove_embeddings(raw_sentences)
         char_embeddings = self.charRNN(char_encoded, C_lengths)
         num_words, char_dim = char_embeddings.size()
-        print(num_words / batch_size)
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
-        return final_embeddings
+
+        shared_output, _ = self.wordRNN(final_embeddings)
+        return shared_output
 
 class NERSpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
@@ -94,18 +97,25 @@ class NERSpecificRNN(nn.Module):
         super(NERSpecificRNN, self).__init__()
 
         if recurrent_unit == "gru":
-            self.birnn = nn.GRU(shared_layer_size, hidden_dim, num_layers, bidirectional=True)
+            self.birnn = nn.GRU(2*shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
         else:
-            self.birnn = nn.LSTM(shared_layer_size, hidden_dim, num_layers, bidirectional=True)
+            self.birnn = nn.LSTM(2*shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
 
+        self.FFNNe1 = nn.Linear(2*shared_layer_size, hidden_dim)
         if activation_type == "relu":
-            self.FFNNe1 = nn.ReLU()
+            self.activation = nn.ReLU()
         elif activation_type == "tanh":
-            self.FFNNe1 = nn.Tanh()
+            self.activation = nn.Tanh()
         elif activation_type == "gelu":
-            self.FFNNe1 = nn.GELU()
+            self.activation = nn.GELU()
         
         self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
+
+    def forward(self, shared_representations, Y):
+        ner_representation, _ = self.birnn(shared_representations)
+        scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
+
+        print("Score shape: ", scores.shape, "Y shape: ", Y.shape)
 
 class RESpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_rel_types, hidden_dim, dropout, num_layers, \
@@ -128,6 +138,7 @@ class CharRNN(nn.Module):
     def __init__(self, cemb, num_layers=1, recurrent_unit="gru"):
         super(CharRNN, self).__init__()
         self.cemb = cemb
+        self.num_layers = num_layers
         if recurrent_unit == "gru":
             self.birnn = nn.GRU(cemb.embedding_dim, cemb.embedding_dim, num_layers, bidirectional=True)
         else:
