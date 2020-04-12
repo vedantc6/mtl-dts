@@ -37,17 +37,17 @@ class CRFLoss(nn.Module):
             tape.append(indices)
         return max_scores, torch.stack(tape[::-1], dim=1)
 
-    def decode_brute(self, scores):
-        B, T, L = scores.size()
-        all_targets = []
-        yseq_scores = []
-        for yseq in itertools.product(list(range(L)), repeat=T):
-            targets = torch.LongTensor(yseq).expand(B, T)
-            all_targets.append(torch.LongTensor(yseq))
-            yseq_scores.append(self.score_targets(scores, targets))
-        max_scores, indices = torch.stack(yseq_scores).max(dim=0)
+    # def decode_brute(self, scores):
+    #     B, T, L = scores.size()
+    #     all_targets = []
+    #     yseq_scores = []
+    #     for yseq in itertools.product(list(range(L)), repeat=T):
+    #         targets = torch.LongTensor(yseq).expand(B, T)
+    #         all_targets.append(torch.LongTensor(yseq))
+    #         yseq_scores.append(self.score_targets(scores, targets))
+    #     max_scores, indices = torch.stack(yseq_scores).max(dim=0)
 
-        return max_scores, torch.stack(all_targets)[indices]
+    #     return max_scores, torch.stack(all_targets)[indices]
 
     def compute_normalizers(self, scores):
         B, T, L = scores.size()
@@ -59,14 +59,14 @@ class CRFLoss(nn.Module):
         normalizers = torch.logsumexp(prev, 1)  # TODO (B)
         return normalizers
 
-    def compute_normalizers_brute(self, scores):
-        B, T, L = scores.size()
-        yseq_scores = []
-        for yseq in itertools.product(list(range(L)), repeat=T):
-            targets = torch.LongTensor(yseq).expand(B, T)
-            yseq_scores.append(self.score_targets(scores, targets))
-        normalizers = torch.stack(yseq_scores).logsumexp(dim=0)
-        return normalizers
+    # def compute_normalizers_brute(self, scores):
+    #     B, T, L = scores.size()
+    #     yseq_scores = []
+    #     for yseq in itertools.product(list(range(L)), repeat=T):
+    #         targets = torch.LongTensor(yseq).expand(B, T)
+    #         yseq_scores.append(self.score_targets(scores, targets))
+    #     normalizers = torch.stack(yseq_scores).logsumexp(dim=0)
+    #     return normalizers
 
     def score_targets(self, scores, targets):
         B, T, L = scores.size()
