@@ -35,8 +35,8 @@ class MTLArchitecture(nn.Module):
         self.loss = nn.CrossEntropyLoss()
 
     def forward(self, X, C, C_lengths, sents):
-        shared_representations = self.shared_layers(X, C, C_lengths, sents)
-        print(shared_representations)
+        shared_representations = self.shared_layers(C, C_lengths, sents)
+        
 
     def do_epoch(self, epoch_num, train_batches, optim, check_interval=200):
         self.train()
@@ -44,6 +44,7 @@ class MTLArchitecture(nn.Module):
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             optim.zero_grad()
+            print(X.shape, len(sents))
             forward_result = self.forward(X, C, C_lengths, sents)
 
 class SharedRNN(nn.Module):
@@ -59,7 +60,7 @@ class SharedRNN(nn.Module):
         self.CharDim = char_dim
         self.Pad_ind = 0
         word_dim = self.ELMODim + self.GloveDim + 2 * self.CharDim
-        self.wemb = nn.Embedding(num_word_types, word_dim, padding_idx=self.Pad_ind)
+        # self.wemb = nn.Embedding(num_word_types, word_dim, padding_idx=self.Pad_ind)
 
         # Initialise char-embedding BiRNN
         self.cemb = nn.Embedding(num_char_types, self.CharDim, padding_idx=self.Pad_ind)
@@ -70,18 +71,22 @@ class SharedRNN(nn.Module):
         else:
             self.wordRNN = nn.LSTM(word_dim, shared_layer_size, num_layers, bidirectional=True)
     
-    def forward(self, X, C, C_lengths, sents):
+    def forward(self, char_encoded, C_lengths, raw_sentences):
         """
         Pass the input sentences through the GRU layers.
 
         :param X: batch of sentences
         :return:
         """
-        elmo_embeddings = load_elmo_embeddings(sents)
-        glove_embeddings = load_glove_embeddings(sents)
-        word_embeddings = torch.cat([elmo_embeddings, glove_embeddings], dim=2)
-        creps = self.charRNN(C, C_lengths).view(B, T, -1)
-        return word_embeddings
+        batch_size = len(raw_sentences)
+        elmo_embeddings = load_elmo_embeddings(raw_sentences)
+        glove_embeddings = load_glove_embeddings(raw_sentences)
+        char_embeddings = self.charRNN(char_encoded, C_lengths)
+        num_words, char_dim = char_embeddings.size()
+        print(num_words / batch_size)
+        char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
+        final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
+        return final_embeddings
 
 class NERSpecificRNN(nn.Module):
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
@@ -139,6 +144,4 @@ class CharRNN(nn.Module):
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)
-        final_h = final_h.view(self.birnn.num_layers, 2, B, self.birnn.hidden_size)[-1]       # 2 x BT x d_c
-        cembs = final_h.transpose(0, 1).contiguous().view(B, -1)  # BT x 2d_c
-        return cembs   
+        return final_h

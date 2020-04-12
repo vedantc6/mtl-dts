@@ -2,6 +2,7 @@ import os
 from utils import load_vertical_tagged_data
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from pprint import pprint
 
 class Dataset():
     """
@@ -39,8 +40,8 @@ class Dataset():
         self.word2x = self.get_imap(self.wordcounter_train, max_size=self.vocab_size, lower=self.lower, pad_unk=True)
         self.tag2y = self.get_imap(self.tagcounter_train, max_size=None, lower=False, pad_unk=True)
         self.relation2y = self.get_imap(self.relcounter_train, max_size=None, lower=False, pad_unk=False)
-        self.char2c = self.get_imap(self.charcounter_train, max_size=None, lower=self.lower, pad_unk=True)
-        
+        self.char2c = self.get_imap(self.charcounter_train, max_size=None, lower=False, pad_unk=True)
+
         # Load validation and test portions.
         (self.wordseqs_val, self.tagseqs_val, self.relseqs_val, self.charseqslist_val, _, _, _, _) = load_vertical_tagged_data(
                                                                                     os.path.join(self.data_dir, self.data_name + '_dev.json'))
@@ -77,7 +78,6 @@ class Dataset():
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths
             wordseq = [word.lower() for word in wordseqs[i]] if self.lower else wordseqs[i]
-            raw_sentence.append(wordseqs[i])
             xseq = torch.LongTensor([self.word2x.get(word, self.UNK_ind) for word in wordseq])
             yseq = torch.LongTensor([self.tag2y.get(tag, self.UNK_ind) for tag in tagseqs[i]])
             rstartseq = []
@@ -90,9 +90,10 @@ class Dataset():
             rstartseq = torch.LongTensor(rstartseq)
             rendseq = torch.LongTensor(rendseq)
             rseq = torch.LongTensor(rseq)
+            
             cseqs = [torch.LongTensor([self.char2c[c] for c in word if c in self.char2c])  # Skip unknown
                      for word in wordseqs[i]]  # Use original words
-
+        
             if length < prev_length or len(xseqs) >= self.batch_size:
                 add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence)
                 xseqs = []
