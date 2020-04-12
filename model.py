@@ -5,9 +5,11 @@ from utils import load_glove_embeddings, load_elmo_embeddings, load_onehot_embed
 from crf import CRFLoss
 import math
 
+
 class MTLArchitecture(nn.Module):
     """
-
+    The main class where all successive architectures are initialised and a forward pass is done through each
+    of them.
     """
 
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
@@ -34,8 +36,8 @@ class MTLArchitecture(nn.Module):
 
         super(MTLArchitecture, self).__init__()
 
-        self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types, \
-                                        char_dim, hidden_dim, dropout, num_layers_shared, recurrent_unit)
+        self.shared_layers = SharedRNN(shared_layer_size, num_char_types, \
+                                       char_dim, dropout, num_layers_shared, recurrent_unit)
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout, \
                                         num_layers_ner, init, activation_type, recurrent_unit)
@@ -46,12 +48,35 @@ class MTLArchitecture(nn.Module):
         self.loss = nn.CrossEntropyLoss()
 
     def forward(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
+        """
+        Do a single forwawrd pass on the entire architecture - through all the shared, NER and RE RNNs.
+
+        :param X: encoded sentences
+        :param Y: encoded tags
+        :param C: encoded characters
+        :param C_lengths: lengths of characters in the words
+        :param rstartseqs: the start indices of the relations for RE
+        :param rendseqs: the end indices of relations for RE
+        :param rseqs:
+        :param sents: raw non-encoded sentences
+        :return:
+        """
+
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        # print("Shared representations: ", shared_representations.shape)
         ner_score = self.ner_layers(shared_representations, Y)
         return ner_score
 
     def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
+        """
+        Run the forward pass in multiple epochs across training batches.
+
+        :param epoch_num: number of epochs
+        :param train_batches: the training data batches
+        :param optim: the optimiser used for minimising the loss
+        :param check_interval: save the results once after this many intervals
+        :return:
+        """
+
         self.train()
 
         output = {}
@@ -89,18 +114,17 @@ class SharedRNN(nn.Module):
     ELMODim = 1024
     GloveDim = 300
     OneHotDim = 7
-    def __init__(self, num_word_types, shared_layer_size, num_char_types, \
-                    char_dim, hidden_dim, dropout, num_layers, recurrent_unit="gru"):
+    def __init__(self, shared_layer_size, num_char_types, \
+                    char_dim, dropout, num_layers, recurrent_unit="gru"):
         """
+        Initialise.
 
-        :param num_word_types:
-        :param shared_layer_size:
-        :param num_char_types:
-        :param char_dim:
-        :param hidden_dim:
-        :param dropout:
-        :param num_layers:
-        :param recurrent_unit:
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_char_types: vocabulary of characters, to be used for CharRNN
+        :param char_dim: character dimension
+        :param dropout: amount of dropout to use
+        :param num_layers: total number of shared layers
+        :param recurrent_unit: the type of recurrent unit to use in the bidirectional RNN - GRU or LSTM
         """
 
         super(SharedRNN, self).__init__()
@@ -119,27 +143,36 @@ class SharedRNN(nn.Module):
 
     def forward(self, char_encoded, C_lengths, raw_sentences):
         """
-        Pass the input sentences through the GRU layers.
+        Do a forward pass by taking the input sentences, generating the respective embeddings and getting the resulting
+        shared representations.
 
-        :param X: batch of sentences
-        :return:
+        :param char_encoded: tensor of encoded characters
+        :param C_lenghts: lengths of the words (number of characters in each word of the sentence)
+        :param raw_sentences: list of raw sentences
+        :return: tensor of shared representations from biRNN
         """
 
         batch_size = len(raw_sentences)
+
+        # Calculate the different embeddings.
         elmo_embeddings = load_elmo_embeddings(raw_sentences)
         glove_embeddings = load_glove_embeddings(raw_sentences)
         char_embeddings = self.charRNN(char_encoded, C_lengths)
         one_hot_embeddings = load_onehot_embeddings(raw_sentences)
+
+        # Concatenate the embeddings.
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
 
+        # Get the shared layer representations.
         shared_output, _ = self.wordRNN(final_embeddings)
         return shared_output
 
 class NERSpecificRNN(nn.Module):
     """
-
+    NER specific bidirectional GRU layers that take in the shared representations from the shared layers and calculates
+    the respective NER scores.
     """
 
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
@@ -147,14 +180,13 @@ class NERSpecificRNN(nn.Module):
         """
         Initialise.
 
-        :param shared_layer_size:
-        :param num_tag_types:
-        :param hidden_dim:
-        :param dropout:
-        :param num_layers:
-        :param init:
-        :param activation_type:
-        :param recurrent_unit:
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_tag_types: unique tags of the model, will be used by NER specific layers
+        :param hidden_dim: the NER biRNN hidden layer dimension
+        :param dropout: dropout values for nodes in biRNN
+        :param num_layers: number of layers in this biRNN
+        :param activation_type: the type of activation function to use
+        :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
         """
 
         super(NERSpecificRNN, self).__init__()
@@ -176,6 +208,15 @@ class NERSpecificRNN(nn.Module):
         self.loss = CRFLoss(num_tag_types, init)
 
     def forward(self, shared_representations, Y):
+        """
+        Do a forward pass by taking input from the shared layers and generating the NER scores for the input
+        sentences.
+
+        :param shared_representations: tensor of shared representations from the shared layer.
+        :param Y: the label NER tags for the input sentences
+        :return: NER scores
+        """
+
         ner_representation, _ = self.birnn(shared_representations)
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         loss = self.loss(scores, Y)
@@ -183,20 +224,22 @@ class NERSpecificRNN(nn.Module):
 
 class RESpecificRNN(nn.Module):
     """
-
+    RE specific bidirectional GRU layers that take in the shared representations from the shared layers and calculates
+    the respective RE scores.
     """
 
     def __init__(self, shared_layer_size, num_rel_types, hidden_dim, dropout, num_layers, \
                     activation_type="relu", recurrent_unit="gru"):
         """
+        Initialise.
 
-        :param shared_layer_size:
-        :param num_rel_types:
-        :param hidden_dim:
-        :param dropout:
-        :param num_layers:
-        :param activation_type:
-        :param recurrent_unit:
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_layers_re: number of RE biRNN layers
+        :param hidden_dim: the NER biRNN hidden layer dimension
+        :param dropout: dropout values for nodes in biRNN
+        :param num_layers: number of layers in this biRNN
+        :param activation_type: the type of activation function to use
+        :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
         """
 
         super(RESpecificRNN, self).__init__()
@@ -217,10 +260,11 @@ class CharRNN(nn.Module):
 
     def __init__(self, cemb, num_layers=1, recurrent_unit="gru"):
         """
+        Initialise.
 
-        :param cemb:
-        :param num_layers:
-        :param recurrent_unit:
+        :param cemb: nn.Embedding for the characters
+        :param num_layers: number of layers in this biRNN
+        :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
         """
 
         super(CharRNN, self).__init__()
@@ -233,10 +277,11 @@ class CharRNN(nn.Module):
 
     def forward(self, padded_chars, char_lengths):
         """
+        Do a forward pass to learn the character embeddings.
 
-        :param padded_chars:
-        :param char_lengths:
-        :return:
+        :param padded_chars: the padded character encodings
+        :param char_lengths: lengths of the words
+        :return: learned character embeddings in the form of biRNN hidden vector
         """
 
         B = len(char_lengths)
