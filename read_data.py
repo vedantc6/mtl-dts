@@ -3,6 +3,7 @@ from utils import load_vertical_tagged_data
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+
 class Dataset():
     """
 
@@ -54,6 +55,7 @@ class Dataset():
 
     def batchfy(self, wordseqs, tagseqs, relseqs, charseqslist):
         batches = []
+
         def add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence):
             if not xseqs:
                 return
