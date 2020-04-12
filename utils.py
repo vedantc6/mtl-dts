@@ -7,7 +7,6 @@ import os
 import torch
 import torch.nn as nn
 
-
 conll_entities = set()
 conll_relations = set()
 
@@ -67,24 +66,19 @@ def load_vertical_tagged_data(path, sort_by_length=True):
                 start, end, rel_type = rel
                 tmp_rel.append((tagseq[start][1] - 1, tagseq[end][1] - 1, rel_type))
 
-        # Build char list
-        charseqslist.append([[c for c in word] for word in datapoint['tokens']])
-        for word in datapoint['tokens']:
-            for c in word:
-                charcounter[c] += 1
-
         wordseqs.append(datapoint["tokens"])
         charseqslist.append([char for words in datapoint["tokens"] for char in words])
         tagseqs.append(tmp_seq)
         relseqs.append(tmp_rel)
 
     for sent, tags, rels, charslist in zip(wordseqs, tagseqs, relseqs, charseqslist):
-        for word, tag, rel, chars in zip(sent, tags, rels, charslist):
+        for word, tag, rel in zip(sent, tags, rels):
             wordcounter[word] += 1
             tagcounter[tag] += 1
             relcounter[rel[2]] += 1
-            for char in chars:
-                charcounter[char] += 1
+
+        for char in charslist:
+            charcounter[char] += 1
 
     if sort_by_length:
         wordseqs, tagseqs, relseqs, charseqslist = (list(t) for t in zip(*sorted(zip(wordseqs, tagseqs, relseqs, charseqslist), \
