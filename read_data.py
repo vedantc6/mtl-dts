@@ -2,7 +2,7 @@ import os
 from utils import load_vertical_tagged_data
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from pprint import pprint
+
 
 class Dataset():
     """
@@ -18,6 +18,18 @@ class Dataset():
                  vocab_size=1000000000,
                  pad='<pad>',
                  unk='<unk>'):
+        """
+
+        :param data_dir:
+        :param data_name:
+        :param batch_size:
+        :param device:
+        :param lower:
+        :param vocab_size:
+        :param pad:
+        :param unk:
+        """
+
         self.data_dir = data_dir
         self.data_name = data_name
         self.batch_size = batch_size
@@ -31,6 +43,10 @@ class Dataset():
         self.populate_attributes()
 
     def populate_attributes(self):
+        """
+
+        """
+
         # Load training portion.
         (self.wordseqs_train, self.tagseqs_train, self.relseqs_train, self.charseqslist_train,\
         self.wordcounter_train, self.tagcounter_train, self.relcounter_train, self.charcounter_train)\
@@ -54,12 +70,21 @@ class Dataset():
         self.batches_test = self.batchfy(self.wordseqs_test, self.tagseqs_test, self.relseqs_test, self.charseqslist_test)
 
     def batchfy(self, wordseqs, tagseqs, relseqs, charseqslist):
+        """
+
+        :param wordseqs:
+        :param tagseqs:
+        :param relseqs:
+        :param charseqslist:
+        :return:
+        """
+
         batches = []
         def add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence):
             if not xseqs:
                 return
             X = torch.stack(xseqs).to(self.device)  # B x T
-            Y = torch.stack(yseqs).to(self.device)  # B x T            
+            Y = torch.stack(yseqs).to(self.device)  # B x T
             flattened_cseqs = [item for sublist in cseqslist for item in sublist]  # List of BT tensors of varying lengths
             C = pad_sequence(flattened_cseqs, padding_value=self.PAD_ind, batch_first=True).to(self.device)  # BT x T_char
             C_lens = torch.LongTensor([s.shape[0] for s in flattened_cseqs]).to(self.device)
@@ -73,7 +98,7 @@ class Dataset():
         cseqslist = []
         prev_length = float('inf')
         raw_sentence = []
-        
+
         for i in range(len(wordseqs)):
             length = len(wordseqs[i])
             assert length <= prev_length  # Assume sequences in decr lengths
@@ -90,10 +115,10 @@ class Dataset():
             rstartseq = torch.LongTensor(rstartseq)
             rendseq = torch.LongTensor(rendseq)
             rseq = torch.LongTensor(rseq)
-            
+
             cseqs = [torch.LongTensor([self.char2c[c] for c in word if c in self.char2c])  # Skip unknown
                      for word in wordseqs[i]]  # Use original words
-        
+
             if length < prev_length or len(xseqs) >= self.batch_size:
                 add_batch(xseqs, yseqs, rstartseqs, rendseqs, rseqs, cseqslist, raw_sentence)
                 xseqs = []
@@ -118,6 +143,15 @@ class Dataset():
         return batches
 
     def get_imap(self, counter, max_size=None, lower=False, pad_unk=True):
+        """
+
+        :param counter:
+        :param max_size:
+        :param lower:
+        :param pad_unk:
+        :return:
+        """
+
         if pad_unk:
             imap = {self.PAD: self.PAD_ind, self.UNK: self.UNK_ind}
         else:
