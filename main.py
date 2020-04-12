@@ -1,11 +1,12 @@
 import argparse
-import torch 
+import torch
 from read_data import Dataset
 from model import MTLArchitecture
 from utils import get_init_weights
 import copy
 import random
 import math
+
 
 def main(args):
     if args.dataset_name == "conll04":
