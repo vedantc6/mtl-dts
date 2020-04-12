@@ -98,12 +98,12 @@ class SharedRNN(nn.Module):
         :param X: batch of sentences
         :return:
         """
+
         batch_size = len(raw_sentences)
         elmo_embeddings = load_elmo_embeddings(raw_sentences)
         glove_embeddings = load_glove_embeddings(raw_sentences)
         char_embeddings = self.charRNN(char_encoded, C_lengths)
         num_words, char_dim = char_embeddings.size()
-        print(num_words / batch_size)
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
         return final_embeddings
@@ -145,6 +145,7 @@ class CharRNN(nn.Module):
     """
     Trains character level embeddings via Bidirectional LSTM.
     """
+    
     def __init__(self, cemb, num_layers=1, recurrent_unit="gru"):
         super(CharRNN, self).__init__()
         self.cemb = cemb

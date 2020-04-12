@@ -5,6 +5,7 @@ from allennlp.modules.elmo import Elmo, batch_to_ids
 from torchtext.vocab import Vectors
 import os
 import torch
+import torch.nn as nn
 
 
 conll_entities = set()
@@ -155,8 +156,3 @@ def load_glove_embeddings(sentences):
 
 def load_onehot_embeddings(sentences):
     pass
-
-
-# FOR TESTING
-if __name__ == "__main__":
-    embeds = load_elmo_embeddings(sentences = [["I", "ate", "an", "apple", "for", "breakfast"],["I", "ate", "an", "orange", "for", "dinner"]])
