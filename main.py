@@ -19,8 +19,8 @@ def main(args):
 
     model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
                             args.hidden_dim, args.dropout, args.num_layers_shared, args.num_layers_ner, \
-                            args.num_layers_re, len(data.tag2y), len(data.relation2y), args.activation_type, \
-                            args.recurrent_unit)
+                            args.num_layers_re, len(data.tag2y), len(data.relation2y), args.init, \
+                            args.activation_type, args.recurrent_unit)
 
     model.apply(get_init_weights(args.init))
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -31,7 +31,7 @@ def main(args):
     try:
         for ep in range(1, args.epochs + 1):
             random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train, optim, check_interval=args.check_interval)
+            output = model.do_epoch(ep, data.batches_train, args.clip, optim, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
@@ -81,7 +81,8 @@ if __name__ == "__main__":
     parser.add_argument('--init', type=float, default=0.01, help='uniform init range [%(default)g]')
     parser.add_argument('--lr', type=float, default=0.002, help='initial learning rate [%(default)g]')
     parser.add_argument('--epochs', type=int, default=10, help='max number of epochs [%(default)d]')
-    parser.add_argument('--check_interval', type=int, default=500, metavar='CH',
+    parser.add_argument('--check_interval', type=int, default=10, metavar='CH',
                         help='number of updates for a check [%(default)d]')
+    parser.add_argument('--clip', type=float, default=1, help='gradient clipping [%(default)g]')
     args = parser.parse_args()
     main(args)

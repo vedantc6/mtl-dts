@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from utils import load_glove_embeddings, load_elmo_embeddings
-
+from crf import CRFLoss
+import math
 
 class MTLArchitecture(nn.Module):
     """
@@ -11,7 +12,7 @@ class MTLArchitecture(nn.Module):
 
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
                         char_dim, hidden_dim, dropout, num_layers_shared, num_layers_ner, num_layers_re, \
-                        num_tag_types, num_rel_types, activation_type="relu", recurrent_unit="gru"):
+                        num_tag_types, num_rel_types, init, activation_type="relu", recurrent_unit="gru"):
         """
         Initialise.
 
@@ -26,6 +27,7 @@ class MTLArchitecture(nn.Module):
         :param num_layers_re: number of RE biRNN layers
         :param num_tag_types: unique tags of the model, will be used by NER specific layers
         :param num_rel_types: unique relations of the model, will be used by RE specific layers
+        :param init: uniform initialization used in NER CRF
         :param activation_type: the type of activation function to use
         :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
         """
@@ -36,7 +38,7 @@ class MTLArchitecture(nn.Module):
                                         char_dim, hidden_dim, dropout, num_layers_shared, recurrent_unit)
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout, \
-                                        num_layers_ner, activation_type, recurrent_unit)
+                                        num_layers_ner, init, activation_type, recurrent_unit)
 
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, \
                                         num_layers_re, activation_type, recurrent_unit)
@@ -45,17 +47,38 @@ class MTLArchitecture(nn.Module):
 
     def forward(self, X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents):
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        print("Shared representations: ", shared_representations.shape)
+        # print("Shared representations: ", shared_representations.shape)
         ner_score = self.ner_layers(shared_representations, Y)
-        # print(ner_score.shape)
+        return ner_score
 
-    def do_epoch(self, epoch_num, train_batches, optim, check_interval=200):
+    def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
         self.train()
 
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             optim.zero_grad()
             forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
+            loss1 = forward_result["loss"]
+            loss1.backward()
+            nn.utils.clip_grad_norm_(self.parameters(), clip)
+            optim.step()
+
+            for key in forward_result:
+                output[key] = forward_result[key] if not key in output else \
+                              output[key] + forward_result[key]
+
+            if (batch_num + 1) % check_interval == 0:
+                print('Epoch {:3d} | Batch {:5d}/{:5d} | '
+                           'Average Loss {:8.4f}'.format(
+                               epoch_num, batch_num + 1, len(train_batches),
+                               output['loss'] / (batch_num + 1)))
+            if math.isnan(output['loss']):
+                print('Stopping training since objective is NaN')
+                break
+        for key in output:
+            output[key] /= (batch_num + 1)
+
+        return output
 
 class SharedRNN(nn.Module):
     """
@@ -119,7 +142,7 @@ class NERSpecificRNN(nn.Module):
     """
 
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
-                    activation_type="relu", recurrent_unit="gru"):
+                    init, activation_type="relu", recurrent_unit="gru"):
         """
         Initialise.
 
@@ -128,6 +151,7 @@ class NERSpecificRNN(nn.Module):
         :param hidden_dim:
         :param dropout:
         :param num_layers:
+        :param init:
         :param activation_type:
         :param recurrent_unit:
         """
@@ -148,12 +172,13 @@ class NERSpecificRNN(nn.Module):
             self.activation = nn.GELU()
 
         self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
+        self.loss = CRFLoss(num_tag_types, init)
 
     def forward(self, shared_representations, Y):
         ner_representation, _ = self.birnn(shared_representations)
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
-
-        print("Score shape: ", scores.shape, "Y shape: ", Y.shape)
+        loss = self.loss(scores, Y)
+        return {'loss': loss}
 
 class RESpecificRNN(nn.Module):
     """
