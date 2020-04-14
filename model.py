@@ -67,8 +67,8 @@ class MTLArchitecture(nn.Module):
         """
 
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        ner_score = self.ner_layers(shared_representations, Y)
-        re_score = self.re_layers(shared_representations, Y, rstartseqs, rendseqs, rseqs)
+        ner_score, tag_embeddings = self.ner_layers(shared_representations, Y)
+        re_score = self.re_layers(rstartseqs, rendseqs, rseqs, sents, shared_representations, tag_embeddings)
         return ner_score
 
     def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
@@ -179,6 +179,7 @@ class NERSpecificRNN(nn.Module):
     the respective NER scores.
     """
 
+    TagLabelEmbedding = 25
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
                     init, activation_type="relu", recurrent_unit="gru"):
         """
@@ -195,6 +196,7 @@ class NERSpecificRNN(nn.Module):
 
         super(NERSpecificRNN, self).__init__()
 
+        self.Pad_ind = 0
         if recurrent_unit == "gru":
             self.birnn = nn.GRU(2*shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
         else:
@@ -209,6 +211,7 @@ class NERSpecificRNN(nn.Module):
             self.activation = nn.GELU()
 
         self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
+        self.tag_embeddings = nn.Embedding(num_tag_types, self.TagLabelEmbedding, padding_idx=self.Pad_ind)
         self.loss = CRFLoss(num_tag_types, init)
 
     def forward(self, shared_representations, Y):
@@ -224,7 +227,8 @@ class NERSpecificRNN(nn.Module):
         ner_representation, _ = self.birnn(shared_representations)
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         loss = self.loss(scores, Y)
-        return {'loss': loss}
+        tag_embeddings = self.tag_embeddings(Y)
+        return {'loss': loss}, tag_embeddings
 
 class RESpecificRNN(nn.Module):
     """
@@ -273,10 +277,19 @@ class RESpecificRNN(nn.Module):
         B, T, E = embeddings.shape
         s
 
-    def forward(self, shared_representations, Y, rstartseqs, rendseqs, rseqs):
+    def forward(self, shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs):
+        """
+        :param shared_representations:
+        :param Y:
+        :param tag_embeddings:
+        :param rstartseqs:
+        :param rendseqs
+        :param rseqs
+        :return:
+        """
         re_representation, _ = self.birnn(shared_representations)
         re_representation = self.trim_embeddings(re_representation, rstartseqs, rendseqs)
-        
+        concatenated_input = torch.cat([shared_representations, tag_embeddings], dim=2)
 
 class CharRNN(nn.Module):
     """
