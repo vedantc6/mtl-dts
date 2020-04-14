@@ -171,7 +171,6 @@ def load_onehot_embeddings(sentences):
         5. More than 50% of characters are numeric
         6. At least one character is numeric
         7. Other
-        8. A vector of 0’s was used for padding
 
     :param sentences:
     :return:
