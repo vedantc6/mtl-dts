@@ -21,7 +21,8 @@ def main(args):
     model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
                             args.hidden_dim, args.dropout, args.num_layers_shared, args.num_layers_ner, \
                             args.num_layers_re, len(data.tag2y), len(data.relation2y), args.init, \
-                            args.activation_type, args.recurrent_unit)
+                            args.label_embeddings_size, args.activation_type, args.recurrent_unit, \
+                            device).to(device)
 
     model.apply(get_init_weights(args.init))
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -85,5 +86,6 @@ if __name__ == "__main__":
     parser.add_argument('--check_interval', type=int, default=10, metavar='CH',
                         help='number of updates for a check [%(default)d]')
     parser.add_argument('--clip', type=float, default=1, help='gradient clipping [%(default)g]')
+    parser.add_argument('--label_embeddings_size', type=float, default=25, help='label embedding size [%(default)g]')
     args = parser.parse_args()
     main(args)
