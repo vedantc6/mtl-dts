@@ -43,11 +43,12 @@ class MTLArchitecture(nn.Module):
                                         recurrent_unit, device)
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout, \
-                                        num_layers_ner, init, activation_type, recurrent_unit)
+                                        num_layers_ner, init, label_embeddings_size, \
+                                        activation_type, recurrent_unit)
 
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, \
                                         num_layers_re, label_embeddings_size, activation_type, \
-                                        recurrent_unit)
+                                        recurrent_unit, device)
 
         self.loss = nn.CrossEntropyLoss()
 
@@ -68,7 +69,7 @@ class MTLArchitecture(nn.Module):
 
         shared_representations = self.shared_layers(C, C_lengths, sents)
         ner_score, tag_embeddings = self.ner_layers(shared_representations, Y)
-        re_score = self.re_layers(rstartseqs, rendseqs, rseqs, sents, shared_representations, tag_embeddings)
+        re_score = self.re_layers(shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs)
         return ner_score
 
     def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
@@ -179,9 +180,8 @@ class NERSpecificRNN(nn.Module):
     the respective NER scores.
     """
 
-    TagLabelEmbedding = 25
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
-                    init, activation_type="relu", recurrent_unit="gru"):
+                    init, label_embeddings_size, activation_type="relu", recurrent_unit="gru"):
         """
         Initialise.
 
@@ -190,6 +190,7 @@ class NERSpecificRNN(nn.Module):
         :param hidden_dim: the NER biRNN hidden layer dimension
         :param dropout: dropout values for nodes in biRNN
         :param num_layers: number of layers in this biRNN
+        :label_embeddings_size: label embedding size
         :param activation_type: the type of activation function to use
         :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
         """
@@ -197,6 +198,9 @@ class NERSpecificRNN(nn.Module):
         super(NERSpecificRNN, self).__init__()
 
         self.Pad_ind = 0
+        self.tag_embeddings = nn.Embedding(num_tag_types, label_embeddings_size, padding_idx=self.Pad_ind)
+        nn.init.xavier_uniform_(self.tag_embeddings.weight.data)
+        
         if recurrent_unit == "gru":
             self.birnn = nn.GRU(2*shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
         else:
@@ -211,7 +215,6 @@ class NERSpecificRNN(nn.Module):
             self.activation = nn.GELU()
 
         self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
-        self.tag_embeddings = nn.Embedding(num_tag_types, self.TagLabelEmbedding, padding_idx=self.Pad_ind)
         self.loss = CRFLoss(num_tag_types, init)
 
     def forward(self, shared_representations, Y):
@@ -237,7 +240,7 @@ class RESpecificRNN(nn.Module):
     """
 
     def __init__(self, shared_layer_size, num_rel_types, hidden_dim, dropout, num_layers, \
-                    label_embeddings_size, activation_type="relu", recurrent_unit="gru"):
+                    label_embeddings_size, activation_type="relu", recurrent_unit="gru", device="cpu"):
         """
         Initialise.
 
@@ -253,6 +256,7 @@ class RESpecificRNN(nn.Module):
 
         super(RESpecificRNN, self).__init__()
 
+        self.device = device
         self.rel_label_embeds = nn.Embedding(num_rel_types, label_embeddings_size)
         nn.init.xavier_uniform_(self.rel_label_embeds.weight.data)
 
@@ -272,10 +276,21 @@ class RESpecificRNN(nn.Module):
 
         self.FFNNr2 = nn.Linear(hidden_dim, num_rel_types)
 
-    def trim_embeddings(self, embeddings, rstartseqs, rendseqs):
-        print(embeddings.shape, rstartseqs, rendseqs)
+    def calculate_dist_mult(ent1, ent2, rel):
+        pass
+    
+    def trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
         B, T, E = embeddings.shape
-        s
+        triplets = []
+        for i in range(B):  # Each sentence
+            print(embeddings[i].shape, rstartseqs[i], rendseqs[i])
+            rstart_list = rstartseqs[i].tolist()
+            rend_list = rendseqs[i].tolist()
+            rel_list = rseqs[i].to(self.device)
+            for start, end, relation in zip(rstart_list, rend_list, rel_list):
+                triplets.append((embeddings[i][start], embeddings[i][end], self.rel_label_embeds(relation)))
+            print(triplets)
+            s
 
     def forward(self, shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs):
         """
@@ -288,8 +303,9 @@ class RESpecificRNN(nn.Module):
         :return:
         """
         re_representation, _ = self.birnn(shared_representations)
-        re_representation = self.trim_embeddings(re_representation, rstartseqs, rendseqs)
         concatenated_input = torch.cat([shared_representations, tag_embeddings], dim=2)
+
+        filtered_embeds = self.trim_embeddings(concatenated_input, rstartseqs, rendseqs, rseqs)
 
 class CharRNN(nn.Module):
     """
@@ -322,6 +338,7 @@ class CharRNN(nn.Module):
         :return: learned character embeddings in the form of biRNN hidden vector
         """
         B = len(char_lengths)
+
         packed = pack_padded_sequence(self.cemb(padded_chars), char_lengths,
                                       batch_first=True, enforce_sorted=False)
         _, (final_h, _) = self.birnn(packed)

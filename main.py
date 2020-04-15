@@ -17,7 +17,7 @@ def main(args):
     device = torch.device('cuda' if args.cuda else 'cpu')
 
     data = Dataset(path, args.dataset_name, 2, device)
-
+    
     model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
                             args.hidden_dim, args.dropout, args.num_layers_shared, args.num_layers_ner, \
                             args.num_layers_re, len(data.tag2y), len(data.relation2y), args.init, \
