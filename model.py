@@ -4,6 +4,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from utils import load_glove_embeddings, load_elmo_embeddings, load_onehot_embeddings
 from crf import CRFLoss
 import math
+import itertools
 
 
 class MTLArchitecture(nn.Module):
@@ -67,8 +68,8 @@ class MTLArchitecture(nn.Module):
         """
 
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        ner_score, tag_embeddings = self.ner_layers(shared_representations, Y)
-        re_score = self.re_layers(rstartseqs, rendseqs, rseqs, sents, shared_representations, tag_embeddings)
+        ner_score, ner_tag_embeddings = self.ner_layers(shared_representations, Y)
+        re_score = self.re_layers(shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs)
         return ner_score
 
     def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
@@ -236,6 +237,7 @@ class RESpecificRNN(nn.Module):
     the respective RE scores.
     """
 
+    EntityEmbeddingSize = 281
     def __init__(self, shared_layer_size, num_rel_types, hidden_dim, dropout, num_layers, \
                     label_embeddings_size, activation_type="relu", recurrent_unit="gru"):
         """
@@ -272,24 +274,54 @@ class RESpecificRNN(nn.Module):
 
         self.FFNNr2 = nn.Linear(hidden_dim, num_rel_types)
 
-    def trim_embeddings(self, embeddings, rstartseqs, rendseqs):
-        print(embeddings.shape, rstartseqs, rendseqs)
-        B, T, E = embeddings.shape
-        s
+        # Initialise matrix for DistMult score calculation
+        self.M = []
+        for _ in range(num_rel_types):
+            self.M.append(torch.diag(torch.rand(size=(self.EntityEmbeddingSize, ))))
+        self.M = torch.stack(self.M)
+        self.M.requires_grad = True
 
-    def forward(self, shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs):
+    def _trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
+        B, T, E = embeddings.shape
+        batches = []
+        for i in range(B):  # Each sentence
+            end_tokens_of_first_entities = embeddings[i][rstartseqs[i]]
+            end_tokens_of_second_entities = embeddings[i][rendseqs[i]]
+            all_end_tokens_embeddings = torch.cat([end_tokens_of_first_entities, end_tokens_of_second_entities], dim=0)
+            all_possible_entity_pairs = list(itertools.combinations(all_end_tokens_embeddings, 2))
+            relation_embeddings = self.rel_label_embeds(rseqs[i])
+            batches.append((all_possible_entity_pairs, relation_embeddings))
+
+        return batches
+
+    def _calculate_distmult_score(self, batches):
+        """
+
+        :param batches:
+        :return:
+        """
+
+        for (entity_pairs, relation_embeddings) in batches:
+            for first_entity_embedding, second_entity_embedding in entity_pairs:
+                distmult_scores = torch.matmul(first_entity_embedding, torch.matmul(self.M, second_entity_embedding.T))
+                print(distmult_scores.shape)
+                s
+
+
+    def forward(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
         """
         :param shared_representations:
-        :param Y:
-        :param tag_embeddings:
+        :param ner_tag_embeddings:
         :param rstartseqs:
         :param rendseqs
         :param rseqs
         :return:
         """
+
         re_representation, _ = self.birnn(shared_representations)
-        re_representation = self.trim_embeddings(re_representation, rstartseqs, rendseqs)
-        concatenated_input = torch.cat([shared_representations, tag_embeddings], dim=2)
+        re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
+        batches = self._trim_embeddings(re_representation, rstartseqs, rendseqs, rseqs)
+        self._calculate_distmult_score(batches)
 
 class CharRNN(nn.Module):
     """
