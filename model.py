@@ -4,18 +4,18 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from utils import load_glove_embeddings, load_elmo_embeddings, load_onehot_embeddings
 from crf import CRFLoss
 import math
-
+import itertools
+from collections import defaultdict
 
 class MTLArchitecture(nn.Module):
     """
     The main class where all successive architectures are initialised and a forward pass is done through each
     of them.
     """
-
     def __init__(self, num_word_types, shared_layer_size, num_char_types, \
                         char_dim, hidden_dim, dropout, num_layers_shared, num_layers_ner, num_layers_re, \
-                        num_tag_types, num_rel_types, init, label_embeddings_size, activation_type="relu", \
-                        recurrent_unit="gru", device='cuda'):
+                        num_tag_types, num_rel_types, init, label_embeddings_size, re_lambda, \
+                        activation_type="relu", recurrent_unit="gru", device='cuda'):
         """
         Initialise.
 
@@ -38,6 +38,7 @@ class MTLArchitecture(nn.Module):
 
         super(MTLArchitecture, self).__init__()
 
+        self.RELossLambda = re_lambda
         self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types, \
                                         char_dim, hidden_dim, dropout, num_layers_shared, \
                                         recurrent_unit, device)
@@ -68,9 +69,9 @@ class MTLArchitecture(nn.Module):
         """
 
         shared_representations = self.shared_layers(C, C_lengths, sents)
-        ner_score, tag_embeddings = self.ner_layers(shared_representations, Y)
-        re_score = self.re_layers(shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs)
-        return ner_score
+        ner_score, ner_tag_embeddings = self.ner_layers(shared_representations, Y)
+        re_score = self.re_layers(shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs)
+        return ner_score, re_score
 
     def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
         """
@@ -88,16 +89,16 @@ class MTLArchitecture(nn.Module):
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             optim.zero_grad()
-            forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
-            loss1 = forward_result["loss"]
-            # ADD RE PART AND CHANGE THE THINGS AFTER THIS LINE
-            loss1.backward()
+            NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
+            loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
+            final_loss = loss_NER + self.RELossLambda * loss_RE
+            final_loss.backward()
+
             nn.utils.clip_grad_norm_(self.parameters(), clip)
             optim.step()
 
-            for key in forward_result:
-                output[key] = forward_result[key] if not key in output else \
-                              output[key] + forward_result[key]
+            output["loss"] = NER_forward_result['loss'] + RE_forward_result['loss'] if not 'loss' in output else \
+                          output["loss"] + (NER_forward_result['loss'] + RE_forward_result['loss'])
 
             if (batch_num + 1) % check_interval == 0:
                 print('Epoch {:3d} | Batch {:5d}/{:5d} | '
@@ -257,8 +258,6 @@ class RESpecificRNN(nn.Module):
         super(RESpecificRNN, self).__init__()
 
         self.device = device
-        self.rel_label_embeds = nn.Embedding(num_rel_types, label_embeddings_size)
-        nn.init.xavier_uniform_(self.rel_label_embeds.weight.data)
 
         # Add check for 0 task-specific layers, it'll be used while hyperparameter tuning
         if recurrent_unit == "gru":
@@ -266,7 +265,8 @@ class RESpecificRNN(nn.Module):
         else:
             self.birnn = nn.LSTM(2*shared_layer_size, shared_layer_size, num_layers, bidirectional=True)
 
-        self.FFNNr1 = nn.Linear(2*shared_layer_size, hidden_dim)
+        final_re_entity_embedding_size = 2 * shared_layer_size + label_embeddings_size
+        self.FFNNr1 = nn.Linear(final_re_entity_embedding_size, 128)
         if activation_type == "relu":
             self.activation = nn.ReLU()
         elif activation_type == "tanh":
@@ -274,25 +274,99 @@ class RESpecificRNN(nn.Module):
         elif activation_type == "gelu":
             self.activation = nn.GELU()
 
-        self.FFNNr2 = nn.Linear(hidden_dim, num_rel_types)
+        self.FFNNr2 = nn.Linear(2 * 128 + 1 + num_rel_types, num_rel_types)
 
-    def calculate_dist_mult(ent1, ent2, rel):
-        pass
-    
-    def trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
+        # Initialise matrix for DistMult score calculation
+        self.M = []
+        for _ in range(num_rel_types):
+            self.M.append(torch.diag(torch.rand(size=(final_re_entity_embedding_size, ))))
+        self.M = torch.stack(self.M).to(self.device)
+        self.M.requires_grad = True
+
+        self.loss = nn.BCELoss()
+
+    def _trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
+        """
+        :param embeddings:
+        :param rstartseqs:
+        :param rendseqs:
+        :param rseqs:
+        :return:
+        """
+
         B, T, E = embeddings.shape
-        triplets = []
+        batches = []
         for i in range(B):  # Each sentence
-            print(embeddings[i].shape, rstartseqs[i], rendseqs[i])
             rstart_list = rstartseqs[i].tolist()
             rend_list = rendseqs[i].tolist()
-            rel_list = rseqs[i].to(self.device)
-            for start, end, relation in zip(rstart_list, rend_list, rel_list):
-                triplets.append((embeddings[i][start], embeddings[i][end], self.rel_label_embeds(relation)))
-            print(triplets)
-            s
+            rseq_list = rseqs[i].tolist()
 
-    def forward(self, shared_representations, Y, tag_embeddings, rstartseqs, rendseqs, rseqs):
+            end_tokens_of_first_entities = embeddings[i][rstartseqs[i]]
+            end_tokens_of_second_entities = embeddings[i][rendseqs[i]]
+            all_end_tokens_embeddings = torch.cat([end_tokens_of_first_entities, end_tokens_of_second_entities], dim=0)
+            all_end_tokens_indices = rstart_list + rend_list
+
+            # All possible entity pairs
+            all_possible_entity_pairs_embeddings = list(itertools.combinations(all_end_tokens_embeddings, 2))
+            all_possible_entity_pairs_indices = list(itertools.combinations(all_end_tokens_indices, 2))
+
+            # True RE labels
+            true_RE_labels = defaultdict(list)
+            for (start, end, relation) in zip(rstart_list, rend_list, rseq_list):
+                true_RE_labels[relation].append((start, end))
+
+            batches.append((all_possible_entity_pairs_embeddings, all_possible_entity_pairs_indices, true_RE_labels))
+
+        return batches
+
+    def _calculate_RE_scores(self, batches):
+        """
+        :param batches:
+        :return:
+        """
+
+        batch_loss = 0
+        for (entity_pairs_embeddings, entity_pairs_indices, true_RE_labels) in batches:
+            for i, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
+
+                # Calculate DistMult score
+                first_entity_embedding = first_entity_embedding.unsqueeze(0).to(self.device) # (1 x p)
+                second_entity_embedding = second_entity_embedding.unsqueeze(0).to(self.device) # (1 x p)
+                distmult_scores = torch.matmul(first_entity_embedding, torch.matmul(self.M, second_entity_embedding.T))
+                distmult_scores = distmult_scores.squeeze(2)
+                distmult_scores = distmult_scores.T # 1 x num_rel_types
+
+                # Hidden representations of entities
+                first_entity_hidden_repr = self.FFNNr1(first_entity_embedding)
+                second_entity_hidden_repr = self.FFNNr1(second_entity_embedding)
+
+                # Cosine distance
+                cosine_distance = torch.cosine_similarity(first_entity_hidden_repr, second_entity_hidden_repr)
+                cosine_distance = cosine_distance.unsqueeze(1) # 1 x 1
+
+                # Concatenate everything
+                final_embedding = torch.cat([first_entity_hidden_repr, second_entity_hidden_repr,
+                                             cosine_distance, distmult_scores], dim=1).to(self.device)
+
+                # RE Scores (Sij)
+                RE_scores_for_entity_pair = self.FFNNr2(final_embedding)
+                sigmoid_RE_scores = torch.sigmoid(RE_scores_for_entity_pair)
+                predicted_RE_labels_for_entity_pair = torch.where(sigmoid_RE_scores > 0.9, sigmoid_RE_scores, torch.zeros(1).to(self.device))
+
+                # Create ground truth RE labels for current entity pair
+                first_entity_end_index = entity_pairs_indices[i][0]
+                second_entity_end_index = entity_pairs_indices[i][1]
+                true_RE_labels_for_entity_pair = torch.zeros_like(predicted_RE_labels_for_entity_pair)
+                for i in range(true_RE_labels_for_entity_pair.shape[1]):
+
+                    # If the particular relation exists between the current entity pair then y = 1 else 0
+                    if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
+                        true_RE_labels_for_entity_pair[:, i] = 1
+
+                batch_loss += self.loss(predicted_RE_labels_for_entity_pair, true_RE_labels_for_entity_pair)
+        return batch_loss
+
+    def forward(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
         """
         :param shared_representations:
         :param Y:
@@ -303,9 +377,10 @@ class RESpecificRNN(nn.Module):
         :return:
         """
         re_representation, _ = self.birnn(shared_representations)
-        concatenated_input = torch.cat([shared_representations, tag_embeddings], dim=2)
-
-        filtered_embeds = self.trim_embeddings(concatenated_input, rstartseqs, rendseqs, rseqs)
+        re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
+        batches = self._trim_embeddings(re_representation, rstartseqs, rendseqs, rseqs)
+        loss = self._calculate_RE_scores(batches)
+        return {'loss': loss}
 
 class CharRNN(nn.Module):
     """
