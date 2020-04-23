@@ -17,7 +17,8 @@ def main(args):
     device = torch.device('cuda' if args.cuda else 'cpu')
 
     data = Dataset(path, args.dataset_name, 2, device)
-    
+    print(data.tag2y, "\n", data.relation2y)
+
     model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
                             args.hidden_dim, args.dropout, args.num_layers_shared, args.num_layers_ner, \
                             args.num_layers_re, len(data.tag2y), len(data.relation2y), args.init, \
@@ -38,9 +39,9 @@ def main(args):
             if math.isnan(output['loss']):
                 break
 
-            # with torch.no_grad():
-            #     eval_result = model.evaluate(data.batches_val, data.tag2y)
-
+            with torch.no_grad():
+                eval_result = model.evaluate(data.batches_val, data.tag2y)
+                print(eval_result)
             # perf = eval_result['acc'] if not 'O' in data.tag2y else \
             #        eval_result['f1_<all>']
 
