@@ -110,7 +110,7 @@ class MTLArchitecture(nn.Module):
         print("Training...")
 
         output = {}
-        for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches[:100]):
+        for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
             print("Batch: ", batch_num + 1)
             optim.zero_grad()
             NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
@@ -122,7 +122,7 @@ class MTLArchitecture(nn.Module):
             optim.step()
 
             output["loss"] = NER_forward_result['loss'] + RE_forward_result['loss'] if not 'loss' in output else \
-                output["loss"] + (NER_forward_result['loss'] + RE_forward_result['loss'])
+                                output["loss"] + (NER_forward_result['loss'] + RE_forward_result['loss'])
 
             if (batch_num + 1) % check_interval == 0:
                 print('Epoch {:3d} | Batch {:5d}/{:5d} | '
@@ -151,12 +151,10 @@ class MTLArchitecture(nn.Module):
         num_preds = 0
         num_correct = 0
         gold_entities = {}
-        for (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in eval_batches[:10]:
+        for (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in eval_batches:
             B, T = Y.size()
-            print("Batch size: ", B)
             ner_preds, re_scores = self.score(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)  # B x T x L
 
-            # _, ner_preds = self.ner_layers.loss.decode(ner_score)   # B x T
             num_preds += B * T
             num_correct += (ner_preds == Y).sum().item()
 
@@ -183,6 +181,7 @@ class MTLArchitecture(nn.Module):
 
             num_rel_total = 0
             num_rel_correct = 0
+            print(rseqs, re_scores)
             for i, rseq in enumerate(rseqs):
                 rseq_list = rseq.tolist()
                 num_rel_total += len(rseq_list)
@@ -478,12 +477,12 @@ class RESpecificRNN(nn.Module):
         for (entity_pairs_embeddings, entity_pairs_indices, true_RE_labels) in batches:
             for i, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
                 predicted_RE_scores_for_entity_pair = self._RE_scoring_layers(first_entity_embedding,
-                                                                              second_entity_embedding)
+                                                                              second_entity_embedding).to(self.device)
 
                 # Create ground truth RE labels for current entity pair
                 first_entity_end_index = entity_pairs_indices[i][0]
                 second_entity_end_index = entity_pairs_indices[i][1]
-                target_RE_Labels_for_entity_pair = torch.zeros(predicted_RE_scores_for_entity_pair.shape)
+                target_RE_Labels_for_entity_pair = torch.zeros(predicted_RE_scores_for_entity_pair.shape).to(self.device)
                 for i in range(predicted_RE_scores_for_entity_pair.shape[1]):
                     # RE_score_for_current_relation = torch.stack([1 - predicted_RE_scores_for_entity_pair[:, i],
                     #                                              predicted_RE_scores_for_entity_pair[:, i]])
