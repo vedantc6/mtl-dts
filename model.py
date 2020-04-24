@@ -400,7 +400,7 @@ class RESpecificRNN(nn.Module):
         self.M = torch.stack(self.M).to(self.device)
         self.M.requires_grad = True
 
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.BCELoss()
 
     def _trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
         """
@@ -483,21 +483,19 @@ class RESpecificRNN(nn.Module):
                 # Create ground truth RE labels for current entity pair
                 first_entity_end_index = entity_pairs_indices[i][0]
                 second_entity_end_index = entity_pairs_indices[i][1]
-
+                target_RE_Labels_for_entity_pair = torch.zeros(predicted_RE_scores_for_entity_pair.shape)
                 for i in range(predicted_RE_scores_for_entity_pair.shape[1]):
-                    RE_score_for_current_relation = torch.stack([1 - predicted_RE_scores_for_entity_pair[:, i],
-                                                                 predicted_RE_scores_for_entity_pair[:, i]])
-                    RE_score_for_current_relation = RE_score_for_current_relation.T
+                    # RE_score_for_current_relation = torch.stack([1 - predicted_RE_scores_for_entity_pair[:, i],
+                    #                                              predicted_RE_scores_for_entity_pair[:, i]])
+                    # RE_score_for_current_relation = RE_score_for_current_relation.T
 
                     # If the particular relation exists between the current entity pair then y = 1 else 0
                     if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
-                        y = torch.tensor([1])
-                    else:
-                        y = torch.tensor([0])
+                        target_RE_Labels_for_entity_pair[:, i] = 1
 
-                    print(RE_score_for_current_relation, y)
-                    batch_loss += self.loss(RE_score_for_current_relation, y)
-        return batch_loss
+                print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
+                batch_loss += self.loss(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
+        return 100 * batch_loss
 
     def forward(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
         """
