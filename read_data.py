@@ -2,7 +2,7 @@ import os
 from utils import load_vertical_tagged_data
 import torch
 from torch.nn.utils.rnn import pad_sequence
-
+import statistics as stat
 
 class Dataset():
     """
@@ -167,3 +167,26 @@ class Dataset():
             if not string in imap:
                 imap[string] = len(imap)
         return imap
+
+    def log(self, logger):
+        logger.log('-'*79)
+        train_lengths = [len(xseq) for xseq in self.wordseqs_train]
+        logger.log('Num train seqs: %d' % len(self.wordseqs_train))
+        logger.log('\tAvg length: %d' % stat.mean(train_lengths))
+        logger.log('\tMax length: %d' % max(train_lengths))
+        logger.log('\tMin length: %d' % min(train_lengths))
+        logger.log('\tStd length: %g' % stat.stdev(train_lengths))
+        logger.log('Num val seqs: %d' % len(self.wordseqs_val))
+        logger.log('Num test seqs: %d' % len(self.wordseqs_test))
+        logger.log('')
+        logger.log('Num word types: %d (including PAD/UNK)' %
+                   len(self.word2x))
+        logger.log('Num NER label types: %d (including PAD/UNK)' %
+                   len(self.tag2y))
+        logger.log('\t%s' % ' '.join(self.tag2y.keys()))
+        logger.log('Num RE label types: %d ' %
+                   len(self.relation2y))
+        logger.log('\t%s' % ' '.join(self.relation2y.keys()))
+        logger.log('Num char types: %d (including PAD/UNK)' %
+                   len(self.char2c))
+        logger.log('\t%s' % ' '.join(self.char2c.keys()))

@@ -95,7 +95,7 @@ class MTLArchitecture(nn.Module):
         re_score = self.re_layers(shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs)
         return ner_score, re_score
 
-    def do_epoch(self, epoch_num, train_batches, clip, optim, check_interval=200):
+    def do_epoch(self, epoch_num, train_batches, clip, optim, logger=None, check_interval=200):
         """
         Run the forward pass in multiple epochs across training batches.
 
@@ -111,7 +111,7 @@ class MTLArchitecture(nn.Module):
 
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
-            print("Batch: ", batch_num + 1)
+            # print(batch_num)
             optim.zero_grad()
             NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
@@ -123,12 +123,20 @@ class MTLArchitecture(nn.Module):
 
             output["loss"] = NER_forward_result['loss'] + RE_forward_result['loss'] if not 'loss' in output else \
                                 output["loss"] + (NER_forward_result['loss'] + RE_forward_result['loss'])
+            output["ner_loss"] = NER_forward_result['loss'] if not 'ner_loss' in output else \
+                                output["ner_loss"] + NER_forward_result['loss']
+            output["re_loss"] = RE_forward_result['loss'] if not 're_loss' in output else \
+                                output["re_loss"] + RE_forward_result['loss']
 
-            if (batch_num + 1) % check_interval == 0:
-                print('Epoch {:3d} | Batch {:5d}/{:5d} | '
-                      'Average Loss {:8.4f}'.format(
-                    epoch_num, batch_num + 1, len(train_batches),
-                               output['loss'] / (batch_num + 1)))
+
+            if logger and (batch_num + 1) % check_interval == 0:
+                logger.log('Epoch {:3d} | Batch {:5d}/{:5d} | '
+                           'Average Loss {:8.4f} | '
+                           'Average NER Loss {:8.4f} | '
+                           'Average RE Loss {:8.4f} \n'.format(epoch_num, batch_num + 1, len(train_batches), 
+                            output['loss'] / (batch_num + 1), output['ner_loss'] / (batch_num + 1), 
+                            output['re_loss'] / (batch_num + 1)))
+
             if math.isnan(output['loss']):
                 print('Stopping training since objective is NaN')
                 break
@@ -137,7 +145,7 @@ class MTLArchitecture(nn.Module):
 
         return output
 
-    def evaluate(self, eval_batches, tag2y=None, rel2y=None):
+    def evaluate(self, eval_batches, logger=None, tag2y=None, rel2y=None):
         self.eval()
         print("Evaluating...")
         if 'O' in tag2y:
@@ -152,42 +160,47 @@ class MTLArchitecture(nn.Module):
         num_correct = 0
         gold_entities = {}
         for (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in eval_batches:
-            B, T = Y.size()
-            ner_preds, re_scores = self.score(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)  # B x T x L
+            try:
+                B, T = Y.size()
+                ner_preds, re_scores = self.score(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)  # B x T x L
 
-            num_preds += B * T
-            num_correct += (ner_preds == Y).sum().item()
+                num_preds += B * T
+                num_correct += (ner_preds == Y).sum().item()
 
-            if 'O' in tag2y:
-                for i in range(B):
-                    gold_bio_labels = [y2tag[Y[i, j].item()]
-                                       for j in range(T)]
-                    pred_bio_labels = [y2tag[ner_preds[i, j].item()]
-                                       for j in range(T)]
-                    gold_boundaries = set(get_boundaries(gold_bio_labels))
-                    pred_boundaries = set(get_boundaries(pred_bio_labels))
-                    for (s, t, entity) in gold_boundaries:
-                        gold_entities[entity] = True
-                        if (s, t, entity) in pred_boundaries:
-                            tp[entity] += 1
-                            tp['<all>'] += 1
-                        else:
-                            fn[entity] += 1
-                            fn['<all>'] += 1
-                    for (s, t, entity) in pred_boundaries:
-                        if not (s, t, entity) in gold_boundaries:
-                            fp[entity] += 1
-                            fp['<all>'] += 1
+                if 'O' in tag2y:
+                    for i in range(B):
+                        gold_bio_labels = [y2tag[Y[i, j].item()]
+                                        for j in range(T)]
+                        pred_bio_labels = [y2tag[ner_preds[i, j].item()]
+                                        for j in range(T)]
+                        gold_boundaries = set(get_boundaries(gold_bio_labels))
+                        pred_boundaries = set(get_boundaries(pred_bio_labels))
+                        for (s, t, entity) in gold_boundaries:
+                            gold_entities[entity] = True
+                            if (s, t, entity) in pred_boundaries:
+                                tp[entity] += 1
+                                tp['<all>'] += 1
+                            else:
+                                fn[entity] += 1
+                                fn['<all>'] += 1
+                        for (s, t, entity) in pred_boundaries:
+                            if not (s, t, entity) in gold_boundaries:
+                                fp[entity] += 1
+                                fp['<all>'] += 1
 
-            num_rel_total = 0
-            num_rel_correct = 0
-            print(rseqs, re_scores)
-            for i, rseq in enumerate(rseqs):
-                rseq_list = rseq.tolist()
-                num_rel_total += len(rseq_list)
-                for j, rel_ind in enumerate(rseq_list):
-                    if re_scores[i][j].tolist()[rel_ind] > 0.9:
-                        num_rel_correct += 1
+                num_rel_total = 0
+                num_rel_correct = 0
+                print(rseqs, re_scores)
+                for i, rseq in enumerate(rseqs):
+                    rseq_list = rseq.tolist()
+                    num_rel_total += len(rseq_list)
+                    for j, rel_ind in enumerate(rseq_list):
+                        if re_scores[i][j].tolist()[rel_ind] > 0.9:
+                            num_rel_correct += 1
+            except:
+                logger.log('-' * 89)
+                logger.log('The batched data is corrupted. X {}, Y: {}, C: {}, C_len: {}'.format(X, Y, C, C_lengths))
+                continue
 
         output = {'ner_acc': num_correct / num_preds * 100}
         output = {'re_acc': num_rel_correct / num_rel_total * 100}
@@ -342,8 +355,8 @@ class NERSpecificRNN(nn.Module):
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         _, preds = self.loss.decode(scores)  # B x T
         tag_embeddings = self.tag_embeddings(preds)
-        print("Actual Predictions: ", Y)
-        print("NER Predictions: ", preds)
+        # print("Actual Predictions: ", Y)
+        # print("NER Predictions: ", preds)
         return preds, tag_embeddings
 
 
@@ -492,9 +505,9 @@ class RESpecificRNN(nn.Module):
                     if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
                         target_RE_Labels_for_entity_pair[:, i] = 1
 
-                print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
+                # print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
                 batch_loss += self.loss(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
-        return 100 * batch_loss
+        return batch_loss
 
     def forward(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
         """
@@ -536,22 +549,24 @@ class RESpecificRNN(nn.Module):
 
         batched = []
         batches = self._trim_embeddings(re_representation, rstartseqs, rendseqs, rseqs)
-        print("Actual relations", rseqs)
         for i, (entity_pairs_embeddings, entity_pairs_indices, true_RE_labels) in enumerate(batches):
             rstart_list = rstartseqs[i].tolist()
             rend_list = rendseqs[i].tolist()
-            filter_r = list(zip(rstart_list, rend_list))
+            filter_r = set(zip(rstart_list, rend_list))
             # print(filter_r)
             pairs = []
+            visited = set()
             for j, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
                 predicted_RE_scores_for_entity_pair = self._RE_scoring_layers(first_entity_embedding,
                                                                               second_entity_embedding)
 
                 first_entity_end_index = entity_pairs_indices[j][0]
                 second_entity_end_index = entity_pairs_indices[j][1]
-                if (first_entity_end_index, second_entity_end_index) in filter_r:
+                if (first_entity_end_index, second_entity_end_index) in filter_r and \
+                    (first_entity_end_index, second_entity_end_index) not in visited:
                     # print(first_entity_end_index, second_entity_end_index)
                     pairs.append(predicted_RE_scores_for_entity_pair.squeeze(0))
+                visited.add((first_entity_end_index, second_entity_end_index))
             batched.append(pairs)
         return batched
 
