@@ -130,3 +130,5 @@ dmypy.json
 data/
 .vscode/
 pretrained_weights/
+
+.lo*
