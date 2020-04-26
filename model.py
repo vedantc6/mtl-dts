@@ -193,22 +193,32 @@ class MTLArchitecture(nn.Module):
                                 fp[entity] += 1
                                 fp['<all>'] += 1
 
-                for rseq, re_score in zip(rseqs, re_scores):
+                for ner_actual, ner_pred, rstartseq, rendseq, rseq, re_score in \
+                        zip(Y, ner_preds, rstartseqs, rendseqs, rseqs, re_scores):
+                    
+                    rstart_list = rstartseq.tolist()
+                    rend_list = rendseq.tolist()
                     rseq_list = rseq.tolist()
                     num_rel_total += len(rseq_list)
-                    for rel_ind, re_sc in zip(rseq_list, re_score):
-                        # print(rel_ind, re_sc, re_sc.tolist()[rel_ind])
+                    for rel_start, rel_end, rel_ind, re_sc in zip(rstart_list, rend_list, \
+                                                                    rseq_list, re_score):
+                        
                         score = np.asarray(re_sc.tolist())
                         max_score = np.max(score)
                         arg_max = np.argmax(score)
+                        true_y_start, true_y_end = ner_actual[rel_start].item(), ner_actual[rel_end].item()
+                        pred_y_start, pred_y_end = ner_pred[rel_start].item(), ner_pred[rel_end].item()
+                        print(true_y_start, true_y_end, pred_y_start, pred_y_end, rel_ind, re_sc.tolist()[rel_ind])
 
                         if max_score >= 0.9:
-                            if arg_max == rel_ind:
+                            if arg_max == rel_ind and pred_y_start == true_y_start \
+                                                and pred_y_end == true_y_end:
                                 re_tp += 1
                             else:
                                 re_fp += 1
                         else:
                             re_fn += 1
+                
             except Exception as e:
                 logger.log('-' * 89)
                 logger.log('X {}, Y: {}, C: {}, C_len: {} \n Error: {}'.format(X, Y, C, C_lengths, e))

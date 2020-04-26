@@ -39,13 +39,13 @@ def main(args):
     try:
         for ep in range(1, args.epochs + 1):
             random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
+            output = model.do_epoch(ep, data.batches_train[:70], args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_val, logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                    eval_result = model.evaluate(data.batches_val[:15], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
                     print(eval_result)
                 
             # perf = eval_result['f1_<all>'] + eval_result['re_f1']
