@@ -13,6 +13,9 @@ def main(args):
         path = "./data/datasets/conll04/"
     else:
         path = "./data/datasets/ade/"
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
     
     logger = Logger(args.model + '.log', True)
 
@@ -39,13 +42,13 @@ def main(args):
     try:
         for ep in range(1, args.epochs + 1):
             random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train[:70], args.clip, optim, logger=logger, check_interval=args.check_interval)
+            output = model.do_epoch(ep, data.batches_train[:100], args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_val[:15], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                    eval_result = model.evaluate(data.batches_test[:25], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
                     print(eval_result)
                 
             # perf = eval_result['f1_<all>'] + eval_result['re_f1']
@@ -177,5 +180,6 @@ if __name__ == "__main__":
     parser.add_argument('--label_embeddings_size', type=int, default=25, help='label embedding size [%(default)g]')
     parser.add_argument('--re_lambda', type=int, default=5, help='RE loss parameter')
     parser.add_argument('--re_f1_size', type=int, default=128)
+    parser.add_argument('--seed', type=int, default=42, help='random seed [%(default)d]')
     args = parser.parse_args()
     main(args)

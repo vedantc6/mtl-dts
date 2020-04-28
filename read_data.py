@@ -50,7 +50,7 @@ class Dataset():
         # Load training portion.
         (self.wordseqs_train, self.tagseqs_train, self.relseqs_train, self.charseqslist_train,\
         self.wordcounter_train, self.tagcounter_train, self.relcounter_train, self.charcounter_train)\
-         = load_vertical_tagged_data(os.path.join(self.data_dir, self.data_name + '_train.json'))
+         = load_vertical_tagged_data(os.path.join(self.data_dir, self.data_name + '_train_dev.json'))
 
         # Create index maps from training portion.
         self.word2x = self.get_imap(self.wordcounter_train, max_size=self.vocab_size, lower=self.lower, pad_unk=True)
