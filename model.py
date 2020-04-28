@@ -317,7 +317,7 @@ class SharedTransformer(nn.Module):
         shared_output = self.transformer(final_embeddings)
         # print(shared_output.shape, shared_output.shape[0],  shared_output.shape[1],  shared_output.shape[2])
         shared_output = self.ff(shared_output)
-        shared_output = nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
+        shared_output = self.ff(final_embeddings) + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
         # print("Shared output: ", shared_output, shared_output.shape)
         # sgags
         return shared_output

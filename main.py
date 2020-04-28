@@ -31,7 +31,7 @@ def main(args):
                             args.r1_activation_type, args.recurrent_unit, device).to(device)
 
     model.apply(get_init_weights(args.init))
-    optim = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optim = torch.optim.AdamW(model.parameters(), lr=args.lr)
     best_model = copy.deepcopy(model)
     best_perf = float('-inf')
     bad_epochs = 0
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     parser.add_argument('--r1_activation_type', default='relu', help='activation for RE FF1 [%(default)g]')
     parser.add_argument('--recurrent_unit', default='gru')
     parser.add_argument('--init', type=float, default=0.01, help='uniform init range [%(default)g]')
-    parser.add_argument('--lr', type=float, default=0.002, help='initial learning rate [%(default)g]')
+    parser.add_argument('--lr', type=float, default=0.003, help='initial learning rate [%(default)g]')
     parser.add_argument('--epochs', type=int, default=10, help='max number of epochs [%(default)d]')
     parser.add_argument('--check_interval', type=int, default=10, metavar='CH',
                         help='number of updates for a check [%(default)d]')
