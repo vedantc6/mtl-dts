@@ -38,20 +38,21 @@ def main(args):
 
     try:
         for ep in range(1, args.epochs + 1):
-            random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train[:70], args.clip, optim, logger=logger, check_interval=args.check_interval)
+            # random.shuffle(data.batches_train)
+            output = model.do_epoch(ep, data.batches_train[:100], args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
+            
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_val[:15], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
-                    print(eval_result)
+                eval_result = model.evaluate(data.batches_test[:30], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                print(eval_result)
                 
             # perf = eval_result['f1_<all>'] + eval_result['re_f1']
 
-            logger.log('Epoch {:3d} | '.format(ep) + ' '.join(['{:s} {:8.3f} | '.format(key, output[key])
-                                 for key in output]), newline=False)
+            logger.log('Epoch {:3d} | '.format(ep) + ' '.join(['{:s} {:8.3f} | '.format(key, eval_result[key])
+                                 for key in eval_result]), newline=False)
             torch.save({'opt': args, 'sd': model.state_dict()}, args.model+'models/model_epoch_' + str(ep))
             # if perf > best_perf:
             #     best_perf = perf
@@ -159,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_name', default="conll04")
     parser.add_argument('--shared_layer_size', type=int, default=256)
     parser.add_argument('--char_dim', type=int, default=32)
-    parser.add_argument('--hidden_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=64)
     parser.add_argument('--dropout', type=float, default=0.35)
     parser.add_argument('--re_dropout', type=float, default=0.5)
     parser.add_argument('--num_layers_shared', type=int, default=1)

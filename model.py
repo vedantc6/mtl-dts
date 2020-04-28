@@ -7,6 +7,7 @@ import math
 import itertools
 from collections import defaultdict, Counter
 import numpy as np
+from transformer import TransformerModel
 
 class MTLArchitecture(nn.Module):
     """
@@ -25,7 +26,7 @@ class MTLArchitecture(nn.Module):
         :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
         :param num_char_types: vocabulary of characters, to be used for CharRNN
         :param char_dim: character dimension
-        :param hidden_dim: hidden dimensions of biRNN
+        :param hidden_dim: hidden dimensions of NER FFe1
         :param dropout: dropout values for nodes in biRNN
         :param num_layers_shared: number of shared biRNN layers
         :param num_layers_ner: number of NER biRNN layers
@@ -41,8 +42,11 @@ class MTLArchitecture(nn.Module):
         super(MTLArchitecture, self).__init__()
 
         self.RELossLambda = re_lambda
-        self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types,
-                                       char_dim, hidden_dim, dropout, num_layers_shared,
+        # self.shared_layers = SharedRNN(num_word_types, shared_layer_size, num_char_types,
+        #                                char_dim, hidden_dim, dropout, num_layers_shared,
+        #                                recurrent_unit, device)
+        self.shared_layers = SharedTransformer(shared_layer_size, num_char_types,
+                                       char_dim, dropout, num_layers_shared,
                                        recurrent_unit, device)
 
         self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout,
@@ -52,6 +56,14 @@ class MTLArchitecture(nn.Module):
         self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, re_dropout,
                                        num_layers_re, label_embeddings_size, re_ff1_size,
                                        r1_activation_type, recurrent_unit, device)
+
+        # self.ner_layers = NERSpecificTransformer(shared_layer_size, num_tag_types, hidden_dim, dropout,
+        #                                  num_layers_ner, init, label_embeddings_size,
+        #                                  e1_activation_type)
+
+        # self.re_layers = RESpecificTransformer(shared_layer_size, num_rel_types, dropout, re_dropout,
+        #                                num_layers_re, label_embeddings_size, re_ff1_size,
+        #                                r1_activation_type, device)
 
         self.loss = nn.CrossEntropyLoss()
 
@@ -111,7 +123,6 @@ class MTLArchitecture(nn.Module):
 
         output = {}
         for batch_num, (X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents) in enumerate(train_batches):
-            # print(batch_num)
             optim.zero_grad()
             NER_forward_result, RE_forward_result = self.forward(X, Y, C, C_lengths, rstartseqs, rendseqs, rseqs, sents)
             loss_NER, loss_RE = NER_forward_result["loss"], RE_forward_result["loss"]
@@ -224,7 +235,7 @@ class MTLArchitecture(nn.Module):
                 logger.log('X {}, Y: {}, C: {}, C_len: {} \n Error: {}'.format(X, Y, C, C_lengths, e))
                 continue
 
-        output["ner_acc"] = 100 * num_correct / num_preds
+        # output["ner_acc"] = 100 * num_correct / num_preds
         output["re_precision"] = 100 * re_tp / (re_tp + re_fp + 1e-16)
         output["re_recall"] = 100 * re_tp / (re_tp + re_fn + 1e-16)
         output["re_f1"] = (2*output["re_recall"]*output["re_precision"])/(output["re_recall"] + output["re_precision"] + 1e-16)
@@ -241,10 +252,76 @@ class MTLArchitecture(nn.Module):
                 output['ner_r_%s' % e] = r_e
                 output['ner_f1_%s' % e] = f1_e
 
-        logger.log("NER: P {}, R {}, F1 {} | RE: P {}, R {}, F1: {}".format(output['ner_p_<all>'],
+        logger.log("NER: P {}, R {}, F1 {} | RE: P {}, R {}, F1 {}".format(output['ner_p_<all>'],
                     output['ner_r_<all>'], output['ner_f1_<all>'], output['re_precision'],
                     output['re_recall'], output['re_f1']))
         return output
+
+class SharedTransformer(nn.Module):
+    """
+    A shared transformer layer that takes in the initial words, converts them to respective embeddings
+    and passes them to the respective NER and RE specific layers.
+    """
+    ELMODim = 1024
+    GloveDim = 300
+    OneHotDim = 7
+
+    def __init__(self, shared_layer_size, num_char_types, \
+                 char_dim, dropout, num_layers, recurrent_unit="gru", \
+                 device="cpu"):
+        """
+        :param num_word_types:
+        :param shared_layer_size:
+        :param num_char_types:
+        :param char_dim:
+        :param dropout:
+        :param num_layers:
+        :param recurrent_unit:
+        """
+
+        super(SharedTransformer, self).__init__()
+        self.CharDim = char_dim
+        self.Pad_ind = 0
+        self.device = device
+        word_dim = self.ELMODim + self.GloveDim + self.CharDim
+        # Initialise char-embedding BiRNN
+        self.cemb = nn.Embedding(num_char_types, self.CharDim, padding_idx=self.Pad_ind)
+        self.charRNN = CharRNN(self.cemb, 1, recurrent_unit)
+        self.dropout = nn.Dropout(p=dropout)
+
+        self.ff = nn.Linear(word_dim, 2*shared_layer_size)
+        self.transformer = TransformerModel(word_dim, nhead=12, nhid=word_dim, nlayers=num_layers)
+        for p in self.transformer.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, char_encoded, C_lengths, raw_sentences):
+        """
+        Pass the input sentences through the GRU layers.
+        :param X: batch of sentences
+        :return:
+        """
+
+        batch_size = len(raw_sentences)
+        elmo_embeddings = load_elmo_embeddings(raw_sentences).to(self.device)
+        glove_embeddings = load_glove_embeddings(raw_sentences).to(self.device)
+        char_embeddings = self.charRNN(char_encoded, C_lengths).to(self.device)
+        # one_hot_embeddings = load_onehot_embeddings(raw_sentences).to(self.device)
+        num_words, char_dim = char_embeddings.size()
+        char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
+        final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
+        # print("After concat: ", final_embeddings, final_embeddings.shape)
+        # final_embeddings = self.ff(final_embeddings)
+        # print("After ff: ", final_embeddings, final_embeddings.shape)
+
+        shared_output = self.transformer(final_embeddings)
+        # print(shared_output.shape, shared_output.shape[0],  shared_output.shape[1],  shared_output.shape[2])
+        shared_output = self.ff(shared_output)
+        shared_output = nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
+        # print("Shared output: ", shared_output, shared_output.shape)
+        # sgags
+        return shared_output
+
 
 class SharedRNN(nn.Module):
     """
@@ -264,7 +341,6 @@ class SharedRNN(nn.Module):
         :param shared_layer_size:
         :param num_char_types:
         :param char_dim:
-        :param hidden_dim:
         :param dropout:
         :param num_layers:
         :param recurrent_unit:
@@ -301,14 +377,85 @@ class SharedRNN(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
-
+        print("Before dropout: ", final_embeddings)
         # Dropout pre BiRNN
         final_embeddings = self.dropout(final_embeddings)
-
+        print("After dropout: ", final_embeddings)
         # Get the shared layer representations.
-        shared_output, _ = self.wordRNN(final_embeddings)
+        shared_output, _ = self.wordRNN(final_embeddings)   # output: B x T x 512 (hidden dim)
+        print("Shared output: ", shared_output, shared_output.shape)
+        gagragsd
         return shared_output
 
+class NERSpecificTransformer(nn.Module):
+    """
+    NER specific transformer layers that take in the shared representations from the shared layers and calculates
+    the respective NER scores.
+    """
+
+    def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
+                 init, label_embeddings_size, activation_type="relu"):
+        """ 
+        :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
+        :param num_tag_types: unique tags of the model, will be used by NER specific layers
+        :param hidden_dim: the hidden layer dimension for FFe1
+        :param dropout: dropout values for nodes in biRNN
+        :param num_layers: number of layers in this biRNN
+        :label_embeddings_size: label embedding size
+        :param activation_type: the type of activation function to use
+        :param recurrent_unit: the type of recurrent unit to use for biRNN - GRU or LSTM
+        """
+
+        super(NERSpecificTransformer, self).__init__()
+
+        self.Pad_ind = 0
+        self.tag_embeddings = nn.Embedding(num_tag_types, label_embeddings_size, padding_idx=self.Pad_ind)
+        nn.init.xavier_uniform_(self.tag_embeddings.weight.data)
+
+        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=4*num_layers)
+
+        self.dropout = nn.Dropout(p=dropout)
+        self.FFNNe1 = nn.Linear(2 * shared_layer_size, hidden_dim)
+        if activation_type == "relu":
+            self.activation = nn.ReLU()
+        elif activation_type == "tanh":
+            self.activation = nn.Tanh()
+        elif activation_type == "gelu":
+            self.activation = nn.GELU()
+
+        self.FFNNe2 = nn.Linear(hidden_dim, num_tag_types)
+        self.loss = CRFLoss(num_tag_types, init)
+
+    def forward(self, shared_representations, Y):
+        """
+        Do a forward pass by taking input from the shared layers and generating the NER scores for the input
+        sentences.
+
+        :param shared_representations: tensor of shared representations from the shared layer.
+        :param Y: the label NER tags for the input sentences
+        :return: NER scores
+        """
+        # Dropout before transformer
+        # shared_representations = self.dropout(shared_representations)
+        ner_representation = self.transformer(shared_representations)
+        scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
+        loss = self.loss(scores, Y)
+        tag_embeddings = self.tag_embeddings(Y)
+        return {'loss': loss}, tag_embeddings
+
+    def scorer(self, shared_representations, Y):
+        """
+        Score the representation at evaluation time
+
+        :param shared_representations: tensor of shared representations from the shared layer.
+        :param Y: the label NER tags for the input sentences
+        :return: NER scores
+        """
+        ner_representation = self.transformer(shared_representations)
+        scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
+        _, preds = self.loss.decode(scores)  # B x T
+        tag_embeddings = self.tag_embeddings(preds)
+        return preds, tag_embeddings
 
 class NERSpecificRNN(nn.Module):
     """
@@ -324,7 +471,7 @@ class NERSpecificRNN(nn.Module):
 
         :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
         :param num_tag_types: unique tags of the model, will be used by NER specific layers
-        :param hidden_dim: the NER biRNN hidden layer dimension
+        :param hidden_dim: the hidden layer dimension for FFe1
         :param dropout: dropout values for nodes in biRNN
         :param num_layers: number of layers in this biRNN
         :label_embeddings_size: label embedding size
@@ -388,6 +535,214 @@ class NERSpecificRNN(nn.Module):
         # print("NER Predictions: ", preds)
         return preds, tag_embeddings
 
+class RESpecificTransformer(nn.Module):
+    """
+    RE specific bidirectional GRU layers that take in the shared representations from the shared layers and calculates
+    the respective RE scores.
+    """
+
+    def __init__(self, shared_layer_size, num_rel_types, dropout, re_dropout, num_layers, \
+                    label_embeddings_size, re_ff1_size, activation_type="relu", device="cpu"):
+        """
+        Initialise.
+
+        :param shared_layer_size:
+        :param num_rel_types:
+        :param dropout:
+        :param num_layers:
+        :param label_embeddings_size:
+        :param activation_type:
+        :param recurrent_unit:
+        """
+
+        super(RESpecificTransformer, self).__init__()
+
+        self.device = device
+
+        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=4*num_layers)
+
+        final_re_entity_embedding_size = 2 * shared_layer_size + label_embeddings_size
+
+        self.dropout = nn.Dropout(p=dropout)
+        self.re_dropout = nn.Dropout(p=re_dropout)
+
+        self.FFNNr1 = nn.Linear(final_re_entity_embedding_size, re_ff1_size)
+
+        if activation_type == "relu":
+            self.activation = nn.ReLU()
+        elif activation_type == "tanh":
+            self.activation = nn.Tanh()
+        elif activation_type == "gelu":
+            self.activation = nn.GELU()
+
+        self.FFNNr2 = nn.Linear((2 * re_ff1_size) + 1 + num_rel_types, num_rel_types)
+
+        # Initialise matrix for DistMult score calculation
+        self.M = []
+        for _ in range(num_rel_types):
+            self.M.append(torch.diag(torch.rand(size=(final_re_entity_embedding_size,))))
+        self.M = torch.stack(self.M).to(self.device)
+        self.M.requires_grad = True
+
+        self.loss = nn.BCELoss()
+
+    def _trim_embeddings(self, embeddings, rstartseqs, rendseqs, rseqs):
+        """
+        :param embeddings:
+        :param rstartseqs:
+        :param rendseqs:
+        :param rseqs:
+        :return:
+        """
+
+        B, T, E = embeddings.shape
+        batches = []
+        for i in range(B):  # Each sentence
+            rstart_list = rstartseqs[i].tolist()
+            rend_list = rendseqs[i].tolist()
+            rseq_list = rseqs[i].tolist()
+
+            end_tokens_of_first_entities = embeddings[i][rstartseqs[i]]
+            end_tokens_of_second_entities = embeddings[i][rendseqs[i]]
+            all_end_tokens_embeddings = torch.cat([end_tokens_of_first_entities, end_tokens_of_second_entities], dim=0)
+            all_end_tokens_indices = rstart_list + rend_list
+
+            # All possible entity pairs
+            all_possible_entity_pairs_embeddings = list(itertools.combinations(all_end_tokens_embeddings, 2))
+            all_possible_entity_pairs_indices = list(itertools.combinations(all_end_tokens_indices, 2))
+
+            # True RE labels
+            true_RE_labels = defaultdict(list)
+            for (start, end, relation) in zip(rstart_list, rend_list, rseq_list):
+                true_RE_labels[relation].append((start, end))
+
+            batches.append((all_possible_entity_pairs_embeddings, all_possible_entity_pairs_indices, true_RE_labels))
+
+        return batches
+
+    def _RE_scoring_layers(self, first_entity_embedding, second_entity_embedding):
+        """
+
+        :param first_entity_embedding:
+        :param second_entity_embedding:
+        :return:
+        """
+
+        # Calculate DistMult score
+        first_entity_embedding = first_entity_embedding.unsqueeze(0).to(self.device)  # (1 x p)
+        second_entity_embedding = second_entity_embedding.unsqueeze(0).to(self.device)  # (1 x p)
+        distmult_scores = torch.matmul(first_entity_embedding, torch.matmul(self.M, second_entity_embedding.T))
+        distmult_scores = distmult_scores.squeeze(2)
+        distmult_scores = distmult_scores.T  # 1 x num_rel_types
+
+        # Hidden representations of entities
+        first_entity_hidden_repr = self.activation(self.FFNNr1(first_entity_embedding))
+        second_entity_hidden_repr = self.activation(self.FFNNr1(second_entity_embedding))
+
+        # Cosine distance
+        cosine_distance = torch.cosine_similarity(first_entity_hidden_repr, second_entity_hidden_repr)
+        cosine_distance = cosine_distance.unsqueeze(1)  # 1 x 1
+
+        # Concatenate everything
+        final_embedding = torch.cat([first_entity_hidden_repr, second_entity_hidden_repr,
+                                     cosine_distance, distmult_scores], dim=1).to(self.device)
+
+        # RE Scores (Sij)
+        RE_scores_for_entity_pair = self.FFNNr2(final_embedding)
+        sigmoid_RE_scores = torch.sigmoid(RE_scores_for_entity_pair)
+        return sigmoid_RE_scores
+
+    def _calculate_RE_scores(self, batches):
+        """
+        :param batches:
+        :return:
+        """
+
+        batch_loss = 0
+        for (entity_pairs_embeddings, entity_pairs_indices, true_RE_labels) in batches:
+            for i, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
+                predicted_RE_scores_for_entity_pair = self._RE_scoring_layers(first_entity_embedding,
+                                                                              second_entity_embedding).to(self.device)
+
+                # Create ground truth RE labels for current entity pair
+                first_entity_end_index = entity_pairs_indices[i][0]
+                second_entity_end_index = entity_pairs_indices[i][1]
+                target_RE_Labels_for_entity_pair = torch.zeros(predicted_RE_scores_for_entity_pair.shape).to(self.device)
+                for i in range(predicted_RE_scores_for_entity_pair.shape[1]):
+                    # RE_score_for_current_relation = torch.stack([1 - predicted_RE_scores_for_entity_pair[:, i],
+                    #                                              predicted_RE_scores_for_entity_pair[:, i]])
+                    # RE_score_for_current_relation = RE_score_for_current_relation.T
+
+                    # If the particular relation exists between the current entity pair then y = 1 else 0
+                    if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
+                        target_RE_Labels_for_entity_pair[:, i] = 1
+
+                # print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
+                batch_loss += self.loss(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
+        return batch_loss
+
+    def forward(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
+        """
+        :param shared_representations:
+        :param Y:
+        :param tag_embeddings:
+        :param rstartseqs:
+        :param rendseqs
+        :param rseqs
+        :return:
+        """
+
+        # Pre biRNN dropout
+        # shared_representations = self.dropout(shared_representations)
+        re_representation = self.transformer(shared_representations)
+        re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
+
+        # Pre RE Scoring Dropout
+        re_representation = self.re_dropout(re_representation)
+
+        batches = self._trim_embeddings(re_representation, rstartseqs, rendseqs, rseqs)
+        loss = self._calculate_RE_scores(batches)
+        return {'loss': loss}
+
+    def scorer(self, shared_representations, ner_tag_embeddings, rstartseqs, rendseqs, rseqs):
+        """
+        :param shared_representations:
+        :param Y:
+        :param tag_embeddings:
+        :param rstartseqs:
+        :param rendseqs
+        :param rseqs
+        :return:
+        """
+
+        re_representation = self.transformer(shared_representations)
+        re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
+
+        # Pre RE Scoring Dropout. In model.eval dropout won't work
+        re_representation = self.dropout(re_representation)
+
+        batched = []
+        batches = self._trim_embeddings(re_representation, rstartseqs, rendseqs, rseqs)
+        for i, (entity_pairs_embeddings, entity_pairs_indices, true_RE_labels) in enumerate(batches):
+            rstart_list = rstartseqs[i].tolist()
+            rend_list = rendseqs[i].tolist()
+            filter_r = set(zip(rstart_list, rend_list))
+            # print(filter_r)
+            pairs = []
+            visited = set()
+            for j, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
+                predicted_RE_scores_for_entity_pair = self._RE_scoring_layers(first_entity_embedding,
+                                                                              second_entity_embedding)
+
+                first_entity_end_index = entity_pairs_indices[j][0]
+                second_entity_end_index = entity_pairs_indices[j][1]
+                if (first_entity_end_index, second_entity_end_index) in filter_r and \
+                    (first_entity_end_index, second_entity_end_index) not in visited:
+                    # print(first_entity_end_index, second_entity_end_index)
+                    pairs.append(predicted_RE_scores_for_entity_pair.squeeze(0))
+                visited.add((first_entity_end_index, second_entity_end_index))
+            batched.append(pairs)
+        return batched
 
 class RESpecificRNN(nn.Module):
     """
@@ -403,7 +758,6 @@ class RESpecificRNN(nn.Module):
 
         :param shared_layer_size:
         :param num_rel_types:
-        :param hidden_dim:
         :param dropout:
         :param num_layers:
         :param label_embeddings_size:
