@@ -42,13 +42,13 @@ def main(args):
     try:
         for ep in range(1, args.epochs + 1):
             random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train[:100], args.clip, optim, logger=logger, check_interval=args.check_interval)
+            output = model.do_epoch(ep, data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_test[:25], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                    eval_result = model.evaluate(data.batches_test, logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
                     print(eval_result)
                 
             # perf = eval_result['f1_<all>'] + eval_result['re_f1']
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument('--r1_activation_type', default='relu', help='activation for RE FF1 [%(default)g]')
     parser.add_argument('--recurrent_unit', default='gru')
     parser.add_argument('--init', type=float, default=0.01, help='uniform init range [%(default)g]')
-    parser.add_argument('--lr', type=float, default=0.002, help='initial learning rate [%(default)g]')
+    parser.add_argument('--lr', type=float, default=0.0005, help='initial learning rate [%(default)g]')
     parser.add_argument('--epochs', type=int, default=10, help='max number of epochs [%(default)d]')
     parser.add_argument('--check_interval', type=int, default=10, metavar='CH',
                         help='number of updates for a check [%(default)d]')
