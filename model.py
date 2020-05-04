@@ -49,21 +49,21 @@ class MTLArchitecture(nn.Module):
                                        char_dim, dropout, num_layers_shared,
                                        recurrent_unit, device)
 
-        self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout,
-                                         num_layers_ner, init, label_embeddings_size,
-                                         e1_activation_type, recurrent_unit)
-
-        self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, re_dropout,
-                                       num_layers_re, label_embeddings_size, re_ff1_size,
-                                       r1_activation_type, recurrent_unit, device)
-
-        # self.ner_layers = NERSpecificTransformer(shared_layer_size, num_tag_types, hidden_dim, dropout,
+        # self.ner_layers = NERSpecificRNN(shared_layer_size, num_tag_types, hidden_dim, dropout,
         #                                  num_layers_ner, init, label_embeddings_size,
-        #                                  e1_activation_type)
+        #                                  e1_activation_type, recurrent_unit)
 
-        # self.re_layers = RESpecificTransformer(shared_layer_size, num_rel_types, dropout, re_dropout,
+        # self.re_layers = RESpecificRNN(shared_layer_size, num_rel_types, hidden_dim, dropout, re_dropout,
         #                                num_layers_re, label_embeddings_size, re_ff1_size,
-        #                                r1_activation_type, device)
+        #                                r1_activation_type, recurrent_unit, device)
+
+        self.ner_layers = NERSpecificTransformer(shared_layer_size, num_tag_types, hidden_dim, dropout,
+                                         num_layers_ner, init, label_embeddings_size,
+                                         e1_activation_type, device)
+
+        self.re_layers = RESpecificTransformer(shared_layer_size, num_rel_types, dropout, re_dropout,
+                                       num_layers_re, label_embeddings_size, re_ff1_size,
+                                       r1_activation_type, device)
 
         self.loss = nn.CrossEntropyLoss()
 
@@ -229,7 +229,7 @@ class MTLArchitecture(nn.Module):
                                 if t == rel_end and (s, t, entity) in pred_boundaries:
                                     second_entity_success = True
                             ner_successful = first_entity_success and second_entity_success
-                            print(ner_successful, rel_ind, re_sc.tolist()[rel_ind])
+                            # print(ner_successful, rel_ind, re_sc.tolist()[rel_ind])
 
                             if max_score >= 0.9:
                                 if arg_max == rel_ind and ner_successful is True:
@@ -319,16 +319,10 @@ class SharedTransformer(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings], dim=2)
-        # print("After concat: ", final_embeddings, final_embeddings.shape)
-        # final_embeddings = self.ff(final_embeddings)
-        # print("After ff: ", final_embeddings, final_embeddings.shape)
 
         shared_output = self.transformer(final_embeddings)
-        # print(shared_output.shape, shared_output.shape[0],  shared_output.shape[1],  shared_output.shape[2])
         shared_output = self.ff(shared_output)
         shared_output = self.ff(final_embeddings) + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
-        # print("Shared output: ", shared_output, shared_output.shape)
-        # sgags
         return shared_output
 
 
@@ -386,14 +380,10 @@ class SharedRNN(nn.Module):
         num_words, char_dim = char_embeddings.size()
         char_embeddings = char_embeddings.view(batch_size, num_words // batch_size, char_dim)
         final_embeddings = torch.cat([elmo_embeddings, glove_embeddings, char_embeddings, one_hot_embeddings], dim=2)
-        print("Before dropout: ", final_embeddings)
         # Dropout pre BiRNN
         final_embeddings = self.dropout(final_embeddings)
-        print("After dropout: ", final_embeddings)
         # Get the shared layer representations.
         shared_output, _ = self.wordRNN(final_embeddings)   # output: B x T x 512 (hidden dim)
-        print("Shared output: ", shared_output, shared_output.shape)
-        gagragsd
         return shared_output
 
 class NERSpecificTransformer(nn.Module):
@@ -403,7 +393,7 @@ class NERSpecificTransformer(nn.Module):
     """
 
     def __init__(self, shared_layer_size, num_tag_types, hidden_dim, dropout, num_layers, \
-                 init, label_embeddings_size, activation_type="relu"):
+                 init, label_embeddings_size, activation_type="relu", device='cpu'):
         """ 
         :param shared_layer_size: final output size of the shared layers, to be as inputs to task-specific layers
         :param num_tag_types: unique tags of the model, will be used by NER specific layers
@@ -421,7 +411,8 @@ class NERSpecificTransformer(nn.Module):
         self.tag_embeddings = nn.Embedding(num_tag_types, label_embeddings_size, padding_idx=self.Pad_ind)
         nn.init.xavier_uniform_(self.tag_embeddings.weight.data)
 
-        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=4*num_layers)
+        self.device = device
+        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=num_layers)
 
         self.dropout = nn.Dropout(p=dropout)
         self.FFNNe1 = nn.Linear(2 * shared_layer_size, hidden_dim)
@@ -446,7 +437,8 @@ class NERSpecificTransformer(nn.Module):
         """
         # Dropout before transformer
         # shared_representations = self.dropout(shared_representations)
-        ner_representation = self.transformer(shared_representations)
+        shared_output = self.transformer(shared_representations)
+        ner_representation = shared_representations + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         loss = self.loss(scores, Y)
         tag_embeddings = self.tag_embeddings(Y)
@@ -460,7 +452,8 @@ class NERSpecificTransformer(nn.Module):
         :param Y: the label NER tags for the input sentences
         :return: NER scores
         """
-        ner_representation = self.transformer(shared_representations)
+        shared_output = self.transformer(shared_representations)
+        ner_representation = shared_representations + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         _, preds = self.loss.decode(scores)  # B x T
         tag_embeddings = self.tag_embeddings(preds)
@@ -540,8 +533,7 @@ class NERSpecificRNN(nn.Module):
         scores = self.FFNNe2(self.activation(self.FFNNe1(ner_representation)))
         _, preds = self.loss.decode(scores)  # B x T
         tag_embeddings = self.tag_embeddings(preds)
-        # print("Actual Predictions: ", Y)
-        # print("NER Predictions: ", preds)
+        
         return preds, tag_embeddings
 
 class RESpecificTransformer(nn.Module):
@@ -568,7 +560,7 @@ class RESpecificTransformer(nn.Module):
 
         self.device = device
 
-        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=4*num_layers)
+        self.transformer = TransformerModel(2*shared_layer_size, nhead=8, nhid=2*shared_layer_size, nlayers=num_layers)
 
         final_re_entity_embedding_size = 2 * shared_layer_size + label_embeddings_size
 
@@ -686,7 +678,6 @@ class RESpecificTransformer(nn.Module):
                     if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
                         target_RE_Labels_for_entity_pair[:, i] = 1
 
-                # print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
                 batch_loss += self.loss(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
         return batch_loss
 
@@ -703,7 +694,8 @@ class RESpecificTransformer(nn.Module):
 
         # Pre biRNN dropout
         # shared_representations = self.dropout(shared_representations)
-        re_representation = self.transformer(shared_representations)
+        shared_output = self.transformer(shared_representations)
+        re_representation = shared_representations + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
         re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
 
         # Pre RE Scoring Dropout
@@ -724,7 +716,8 @@ class RESpecificTransformer(nn.Module):
         :return:
         """
 
-        re_representation = self.transformer(shared_representations)
+        shared_output = self.transformer(shared_representations)
+        re_representation = shared_representations + nn.BatchNorm1d(shared_output.shape[2]).to(self.device)(shared_output.transpose(1, 2)).transpose(1, 2)
         re_representation = torch.cat([re_representation, ner_tag_embeddings], dim=2)
 
         # Pre RE Scoring Dropout. In model.eval dropout won't work
@@ -736,7 +729,6 @@ class RESpecificTransformer(nn.Module):
             rstart_list = rstartseqs[i].tolist()
             rend_list = rendseqs[i].tolist()
             filter_r = set(zip(rstart_list, rend_list))
-            # print(filter_r)
             pairs = []
             visited = set()
             for j, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
@@ -747,7 +739,6 @@ class RESpecificTransformer(nn.Module):
                 second_entity_end_index = entity_pairs_indices[j][1]
                 if (first_entity_end_index, second_entity_end_index) in filter_r and \
                     (first_entity_end_index, second_entity_end_index) not in visited:
-                    # print(first_entity_end_index, second_entity_end_index)
                     pairs.append(predicted_RE_scores_for_entity_pair.squeeze(0))
                 visited.add((first_entity_end_index, second_entity_end_index))
             batched.append(pairs)
@@ -900,7 +891,6 @@ class RESpecificRNN(nn.Module):
                     if (first_entity_end_index, second_entity_end_index) in true_RE_labels[i]:
                         target_RE_Labels_for_entity_pair[:, i] = 1
 
-                # print(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
                 batch_loss += self.loss(predicted_RE_scores_for_entity_pair, target_RE_Labels_for_entity_pair)
         return batch_loss
 
@@ -950,7 +940,6 @@ class RESpecificRNN(nn.Module):
             rstart_list = rstartseqs[i].tolist()
             rend_list = rendseqs[i].tolist()
             filter_r = set(zip(rstart_list, rend_list))
-            # print(filter_r)
             pairs = []
             visited = set()
             for j, (first_entity_embedding, second_entity_embedding) in enumerate(entity_pairs_embeddings):
@@ -961,7 +950,6 @@ class RESpecificRNN(nn.Module):
                 second_entity_end_index = entity_pairs_indices[j][1]
                 if (first_entity_end_index, second_entity_end_index) in filter_r and \
                     (first_entity_end_index, second_entity_end_index) not in visited:
-                    # print(first_entity_end_index, second_entity_end_index)
                     pairs.append(predicted_RE_scores_for_entity_pair.squeeze(0))
                 visited.add((first_entity_end_index, second_entity_end_index))
             batched.append(pairs)

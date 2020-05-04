@@ -38,7 +38,7 @@ def main(args):
 
     try:
         for ep in range(1, args.epochs + 1):
-            # random.shuffle(data.batches_train)
+            random.shuffle(data.batches_train)
             output = model.do_epoch(ep, data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
