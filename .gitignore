@@ -132,3 +132,4 @@ data/
 pretrained_weights/
 
 .lo*
+/models

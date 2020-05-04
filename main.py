@@ -13,6 +13,9 @@ def main(args):
         path = "./data/datasets/conll04/"
     else:
         path = "./data/datasets/ade/"
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
     
     logger = Logger(args.model + '.log', True)
 
@@ -24,10 +27,11 @@ def main(args):
     logger.log(str(args))
 
     model = MTLArchitecture(len(data.word2x), args.shared_layer_size, len(data.char2c), args.char_dim, \
-                            args.hidden_dim, args.dropout, args.num_layers_shared, args.num_layers_ner, \
-                            args.num_layers_re, len(data.tag2y), len(data.relation2y), args.init, \
-                            args.label_embeddings_size, args.re_lambda, args.activation_type, \
-                            args.recurrent_unit, device).to(device)
+                            args.hidden_dim, args.dropout, args.re_dropout, args.num_layers_shared, \
+                            args.num_layers_ner, args.num_layers_re, len(data.tag2y), \
+                            len(data.relation2y), args.init, args.label_embeddings_size, \
+                            args.re_f1_size, args.re_lambda, args.e1_activation_type, \
+                            args.r1_activation_type, args.recurrent_unit, device).to(device)
 
     model.apply(get_init_weights(args.init))
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -38,21 +42,20 @@ def main(args):
     try:
         for ep in range(1, args.epochs + 1):
             random.shuffle(data.batches_train)
-            output = model.do_epoch(ep, data.batches_train[:100], args.clip, optim, logger=logger, check_interval=args.check_interval)
+            output = model.do_epoch(ep, data.batches_train, args.clip, optim, logger=logger, check_interval=args.check_interval)
 
             if math.isnan(output['loss']):
                 break
 
             with torch.no_grad():
-                    eval_result = model.evaluate(data.batches_val[:20], logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
+                    eval_result = model.evaluate(data.batches_test, logger=logger, tag2y=data.tag2y, rel2y=data.relation2y)
                     print(eval_result)
                 
-            # perf = eval_result['acc'] if not 'O' in data.tag2y else \
-            #        eval_result['f1_<all>']
+            # perf = eval_result['f1_<all>'] + eval_result['re_f1']
 
             logger.log('Epoch {:3d} | '.format(ep) + ' '.join(['{:s} {:8.3f} | '.format(key, output[key])
                                  for key in output]), newline=False)
-
+            torch.save({'opt': args, 'sd': model.state_dict()}, args.model+'models/model_epoch_' + str(ep))
             # if perf > best_perf:
             #     best_perf = perf
             #     bad_epochs = 0
@@ -157,22 +160,26 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default='./', help='model path')
     parser.add_argument('--cuda', action='store_true', help='use CUDA?')
     parser.add_argument('--dataset_name', default="conll04")
-    parser.add_argument('--shared_layer_size', type=int, default=128)
+    parser.add_argument('--shared_layer_size', type=int, default=256)
     parser.add_argument('--char_dim', type=int, default=32)
     parser.add_argument('--hidden_dim', type=int, default=32)
-    parser.add_argument('--dropout', type=float, default=0.5)
+    parser.add_argument('--dropout', type=float, default=0.35)
+    parser.add_argument('--re_dropout', type=float, default=0.5)
     parser.add_argument('--num_layers_shared', type=int, default=1)
     parser.add_argument('--num_layers_ner', type=int, default=1)
-    parser.add_argument('--num_layers_re', type=int, default=1)
-    parser.add_argument('--activation_type', default='relu')
+    parser.add_argument('--num_layers_re', type=int, default=2)
+    parser.add_argument('--e1_activation_type', default='tanh', help='activation for NER FF1 [%(default)g]')
+    parser.add_argument('--r1_activation_type', default='relu', help='activation for RE FF1 [%(default)g]')
     parser.add_argument('--recurrent_unit', default='gru')
     parser.add_argument('--init', type=float, default=0.01, help='uniform init range [%(default)g]')
-    parser.add_argument('--lr', type=float, default=0.002, help='initial learning rate [%(default)g]')
+    parser.add_argument('--lr', type=float, default=0.0005, help='initial learning rate [%(default)g]')
     parser.add_argument('--epochs', type=int, default=10, help='max number of epochs [%(default)d]')
     parser.add_argument('--check_interval', type=int, default=10, metavar='CH',
                         help='number of updates for a check [%(default)d]')
     parser.add_argument('--clip', type=float, default=1, help='gradient clipping [%(default)g]')
     parser.add_argument('--label_embeddings_size', type=int, default=25, help='label embedding size [%(default)g]')
     parser.add_argument('--re_lambda', type=int, default=5, help='RE loss parameter')
+    parser.add_argument('--re_f1_size', type=int, default=128)
+    parser.add_argument('--seed', type=int, default=42, help='random seed [%(default)d]')
     args = parser.parse_args()
     main(args)
