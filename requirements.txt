@@ -51,7 +51,7 @@ fastcache==1.1.0
 filelock==3.0.12
 flaky==3.6.1
 Flask==1.1.1
-Flask-Cors==3.0.8
+Flask-Cors==3.0.9
 fsspec==0.5.2
 ftfy==5.7
 fuzzywuzzy==0.17.0
