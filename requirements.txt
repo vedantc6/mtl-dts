@@ -42,7 +42,7 @@ cytoolz==0.10.0
 dask==2.5.2
 decorator==4.4.0
 defusedxml==0.6.0
-distributed==2.5.2
+distributed==2021.10.0
 docutils==0.15.2
 editdistance==0.5.3
 entrypoints==0.3
